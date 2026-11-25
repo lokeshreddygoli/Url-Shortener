@@ -253,6 +253,7 @@ export async function resolveRedirect(
 
   // 8. Record click asynchronously (non-blocking)
   recordClickNonBlocking({
+    eventId: crypto.randomUUID(),
     shortUrlId: link.id,
     clickedAt: new Date().toISOString(),
     referrerHost: meta.referrerHost,

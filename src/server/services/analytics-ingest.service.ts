@@ -1,9 +1,12 @@
+import crypto from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getRedisClient } from "@/lib/redis";
 import { CLICK_MILESTONES, webhookService } from "@/server/services/webhook.service";
 
 export interface ClickEventPayload {
+  eventId?: string;
   shortUrlId: string;
   clickedAt: string;
   referrerHost: string | null;
@@ -23,12 +26,27 @@ export interface ClickEventPayload {
   variantId: string | null;
 }
 
-const CLICK_QUEUE_KEY =
-  process.env.NODE_ENV === "test"
-    ? "shortly:test:clicks:queue"
-    : "shortly:clicks:queue";
+const REDIS_PREFIX = process.env.NODE_ENV === "test" ? "shortly:test:" : "shortly:";
+const CLICK_QUEUE_KEY = `${REDIS_PREFIX}clicks:queue`;
+const CLICK_PROCESSING_KEY = `${REDIS_PREFIX}clicks:processing`;
 const BATCH_SIZE = 50;
 const FLUSH_INTERVAL_MS = 1000;
+
+/**
+ * Atomically moves up to ARGV[1] items from KEYS[1] (queue) to KEYS[2] (processing)
+ * inside a single Redis Lua execution (compatible with Redis 3.0 through Redis 7+).
+ */
+const ATOMIC_MOVE_BATCH_LUA = `
+local items = {}
+local count = tonumber(ARGV[1])
+for i = 1, count do
+  local v = redis.call('LPOP', KEYS[1])
+  if not v then break end
+  redis.call('RPUSH', KEYS[2], v)
+  table.insert(items, v)
+end
+return items
+`;
 
 const pendingWrites = new Set<Promise<void>>();
 let flushTimer: NodeJS.Timeout | null = null;
@@ -40,55 +58,87 @@ function trackPromise(p: Promise<void>) {
   p.finally(() => pendingWrites.delete(p));
 }
 
-export async function persistClickBatch(events: ClickEventPayload[]): Promise<void> {
-  if (events.length === 0) return;
+export async function persistClickBatch(events: ClickEventPayload[]): Promise<number> {
+  if (events.length === 0) return 0;
+
+  const normalizedEvents = events.map((ev) => ({
+    ...ev,
+    eventId: ev.eventId || crypto.randomUUID(),
+  }));
 
   // Filter out events for links that have since been deleted so one deleted link cannot poison a batch
-  const candidateIds = Array.from(new Set(events.map((e) => e.shortUrlId)));
+  const candidateIds = Array.from(new Set(normalizedEvents.map((e) => e.shortUrlId)));
   const existingLinks = await prisma.shortUrl.findMany({
     where: { id: { in: candidateIds } },
     select: { id: true },
   });
   const validIdSet = new Set(existingLinks.map((l) => l.id));
-  const validEvents = events.filter((e) => validIdSet.has(e.shortUrlId));
-  if (validEvents.length === 0) return;
+  const validEvents = normalizedEvents.filter((e) => validIdSet.has(e.shortUrlId));
+  if (validEvents.length === 0) return 0;
 
-  // Insert click events in a batch
-  await prisma.clickEvent.createMany({
-    data: validEvents.map((ev) => ({
-      shortUrlId: ev.shortUrlId,
-      clickedAt: new Date(ev.clickedAt),
-      referrerHost: ev.referrerHost,
-      referrerUrl: ev.referrerUrl,
-      country: ev.country,
-      region: ev.region,
-      city: ev.city,
-      deviceType: ev.deviceType,
-      browser: ev.browser,
-      os: ev.os,
-      isBot: ev.isBot,
-      visitorHash: ev.visitorHash,
-      source: ev.source,
-      utmSource: ev.utmSource,
-      utmMedium: ev.utmMedium,
-      utmCampaign: ev.utmCampaign,
-      variantId: ev.variantId,
-    })),
-  });
+  // Idempotent insert: ON CONFLICT (id) DO NOTHING RETURNING ensures crash recovery
+  // after DB commit never double-counts ShortUrl.clickCount or DailyLinkStats.
+  const valuesSql = Prisma.join(
+    validEvents.map(
+      (ev) => Prisma.sql`(
+        ${ev.eventId},
+        ${ev.shortUrlId},
+        ${new Date(ev.clickedAt)},
+        ${ev.referrerHost},
+        ${ev.referrerUrl},
+        ${ev.country},
+        ${ev.region},
+        ${ev.city},
+        ${ev.deviceType},
+        ${ev.browser},
+        ${ev.os},
+        ${ev.isBot},
+        ${ev.visitorHash},
+        ${ev.source},
+        ${ev.utmSource},
+        ${ev.utmMedium},
+        ${ev.utmCampaign},
+        ${ev.variantId}
+      )`
+    )
+  );
 
-  // Aggregate increments per shortUrlId and per (shortUrlId, day)
+  const insertedRows = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      shortUrlId: string;
+      clickedAt: Date;
+      isBot: boolean;
+      source: string | null;
+    }>
+  >(Prisma.sql`
+    INSERT INTO "ClickEvent" (
+      "id", "shortUrlId", "clickedAt", "referrerHost", "referrerUrl",
+      "country", "region", "city", "deviceType", "browser", "os", "isBot",
+      "visitorHash", "source", "utmSource", "utmMedium", "utmCampaign", "variantId"
+    )
+    VALUES ${valuesSql}
+    ON CONFLICT ("id") DO NOTHING
+    RETURNING "id", "shortUrlId", "clickedAt", "isBot", "source"
+  `);
+
+  if (insertedRows.length === 0) {
+    return 0;
+  }
+
+  // Aggregate increments ONLY for newly inserted rows
   const countsByLink = new Map<string, number>();
   const dailyMap = new Map<
     string,
     { shortUrlId: string; day: Date; total: number; human: number; bot: number; qr: number }
   >();
 
-  for (const ev of validEvents) {
-    countsByLink.set(ev.shortUrlId, (countsByLink.get(ev.shortUrlId) ?? 0) + 1);
-    const dayStr = ev.clickedAt.slice(0, 10);
-    const key = `${ev.shortUrlId}:${dayStr}`;
+  for (const row of insertedRows) {
+    countsByLink.set(row.shortUrlId, (countsByLink.get(row.shortUrlId) ?? 0) + 1);
+    const dayStr = new Date(row.clickedAt).toISOString().slice(0, 10);
+    const key = `${row.shortUrlId}:${dayStr}`;
     const existing = dailyMap.get(key) ?? {
-      shortUrlId: ev.shortUrlId,
+      shortUrlId: row.shortUrlId,
       day: new Date(`${dayStr}T00:00:00.000Z`),
       total: 0,
       human: 0,
@@ -96,21 +146,21 @@ export async function persistClickBatch(events: ClickEventPayload[]): Promise<vo
       qr: 0,
     };
     existing.total += 1;
-    if (ev.isBot) existing.bot += 1;
+    if (row.isBot) existing.bot += 1;
     else existing.human += 1;
-    if (ev.source === "qr") existing.qr += 1;
+    if (row.source === "qr") existing.qr += 1;
     dailyMap.set(key, existing);
   }
 
-  const updatedLinks = await Promise.all([
-    ...Array.from(countsByLink.entries()).map(([shortUrlId, count]) =>
+  const updatedLinks = await Promise.all(
+    Array.from(countsByLink.entries()).map(([shortUrlId, count]) =>
       prisma.shortUrl.update({
         where: { id: shortUrlId },
         data: { clickCount: { increment: count } },
         select: { id: true, userId: true, code: true, clickCount: true },
       })
-    ),
-  ]);
+    )
+  );
 
   await Promise.all(
     Array.from(dailyMap.values()).map((d) =>
@@ -139,7 +189,7 @@ export async function persistClickBatch(events: ClickEventPayload[]): Promise<vo
     )
   );
 
-  // Fire click.milestone webhooks if a batch crossed a milestone
+  // Fire click.milestone webhooks if this batch crossed a threshold
   for (const link of updatedLinks) {
     if (!link.userId) continue;
     const added = countsByLink.get(link.id) ?? 0;
@@ -155,55 +205,86 @@ export async function persistClickBatch(events: ClickEventPayload[]): Promise<vo
       }
     }
   }
+
+  return insertedRows.length;
 }
 
-export async function drainRedisClickQueue(): Promise<number> {
+function parseRawClickPayloads(rawItems: string[]): ClickEventPayload[] {
+  const parsed: ClickEventPayload[] = [];
+  for (const raw of rawItems) {
+    try {
+      parsed.push(JSON.parse(raw) as ClickEventPayload);
+    } catch {
+      logger.warn("Dropped malformed click payload from Redis queue");
+    }
+  }
+  return parsed;
+}
+
+export interface DrainOptions {
+  /** Test hook to simulate a worker crash mid-flush after moving items to processing */
+  simulateCrashBeforeAck?: boolean;
+  simulateCrashAfterCommit?: boolean;
+}
+
+export async function drainRedisClickQueue(opts: DrainOptions = {}): Promise<number> {
   if (flushing) return 0;
   const redis = getRedisClient();
   if (!redis) return 0;
 
   flushing = true;
   let totalFlushed = 0;
+
   try {
     if (redis.status === "wait") await redis.connect();
 
+    // 1. Recover any unacknowledged items from the processing list (crash recovery)
     while (true) {
-      const txResult = await redis
-        .multi()
-        .lrange(CLICK_QUEUE_KEY, 0, BATCH_SIZE - 1)
-        .ltrim(CLICK_QUEUE_KEY, BATCH_SIZE, -1)
-        .exec();
+      const leftover = await redis.lrange(CLICK_PROCESSING_KEY, 0, BATCH_SIZE - 1);
+      if (!leftover || leftover.length === 0) break;
 
-      const items = (txResult?.[0]?.[1] as string[] | undefined) ?? [];
-      if (items.length === 0) break;
-
-      const parsed: ClickEventPayload[] = [];
-      for (const raw of items) {
-        try {
-          parsed.push(JSON.parse(raw) as ClickEventPayload);
-        } catch {
-          logger.warn("Dropped malformed click payload from Redis queue");
-        }
-      }
-
+      const parsed = parseRawClickPayloads(leftover);
       if (parsed.length > 0) {
-        try {
-          await persistClickBatch(parsed);
-          totalFlushed += parsed.length;
-        } catch (err) {
-          // Push back on transient DB error so no clicks are lost
-          await redis.rpush(
-            CLICK_QUEUE_KEY,
-            ...parsed.map((p) => JSON.stringify(p))
-          );
-          throw err;
-        }
+        totalFlushed += await persistClickBatch(parsed);
+      }
+      await redis.ltrim(CLICK_PROCESSING_KEY, leftover.length, -1);
+      if (leftover.length < BATCH_SIZE) break;
+    }
+
+    // 2. Atomically move batches from queue -> processing, persist idempotently, then ack
+    while (true) {
+      const moved = (await redis.eval(
+        ATOMIC_MOVE_BATCH_LUA,
+        2,
+        CLICK_QUEUE_KEY,
+        CLICK_PROCESSING_KEY,
+        String(BATCH_SIZE)
+      )) as string[] | null;
+
+      if (!moved || moved.length === 0) break;
+
+      if (opts.simulateCrashBeforeAck) {
+        throw new Error("Simulated worker crash before DB persist");
       }
 
-      if (items.length < BATCH_SIZE) break;
+      const parsed = parseRawClickPayloads(moved);
+      if (parsed.length > 0) {
+        totalFlushed += await persistClickBatch(parsed);
+      }
+
+      if (opts.simulateCrashAfterCommit) {
+        throw new Error("Simulated worker crash after DB commit before queue ack");
+      }
+
+      await redis.ltrim(CLICK_PROCESSING_KEY, moved.length, -1);
+      if (moved.length < BATCH_SIZE) break;
     }
   } catch (err) {
-    logger.error({ err }, "Failed draining Redis click queue");
+    if (!opts.simulateCrashBeforeAck && !opts.simulateCrashAfterCommit) {
+      logger.error({ err }, "Failed draining Redis click queue");
+    } else {
+      throw err;
+    }
   } finally {
     flushing = false;
   }
@@ -231,13 +312,17 @@ function ensureWorkerStarted() {
 
 export function recordClickNonBlocking(payload: ClickEventPayload): void {
   ensureWorkerStarted();
+  const withId: ClickEventPayload = {
+    ...payload,
+    eventId: payload.eventId || crypto.randomUUID(),
+  };
 
   const task = (async () => {
     const redis = getRedisClient();
     if (redis) {
       try {
         if (redis.status === "wait") await redis.connect();
-        const len = await redis.rpush(CLICK_QUEUE_KEY, JSON.stringify(payload));
+        const len = await redis.rpush(CLICK_QUEUE_KEY, JSON.stringify(withId));
         if (len >= BATCH_SIZE) {
           await drainRedisClickQueue();
         }
@@ -248,9 +333,9 @@ export function recordClickNonBlocking(payload: ClickEventPayload): void {
     }
 
     try {
-      await persistClickBatch([payload]);
+      await persistClickBatch([withId]);
     } catch (err) {
-      logger.error({ err, shortUrlId: payload.shortUrlId }, "Direct click DB insert failed");
+      logger.error({ err, shortUrlId: withId.shortUrlId }, "Direct click DB insert failed");
     }
   })();
 
@@ -263,3 +348,8 @@ export async function flushPendingClicks(): Promise<void> {
   }
   await drainRedisClickQueue();
 }
+
+export const CLICK_QUEUE_KEYS = {
+  queue: CLICK_QUEUE_KEY,
+  processing: CLICK_PROCESSING_KEY,
+};

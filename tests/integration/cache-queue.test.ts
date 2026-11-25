@@ -7,10 +7,13 @@ import { prisma } from "@/lib/db";
 import { closeRedis, pingRedis } from "@/lib/redis";
 import { getCachedLink, invalidateCachedLink, setCachedLink } from "@/lib/cache";
 import {
+  CLICK_QUEUE_KEYS,
+  drainRedisClickQueue,
   flushPendingClicks,
   persistClickBatch,
   recordClickNonBlocking,
 } from "@/server/services/analytics-ingest.service";
+import { getRedisClient } from "@/lib/redis";
 import { urlService } from "@/server/services/url.service";
 
 describe("Cache, click queue, rollups, and graceful fallback (real PostgreSQL + Redis)", () => {
@@ -199,5 +202,99 @@ describe("Cache, click queue, rollups, and graceful fallback (real PostgreSQL + 
       where: { shortUrlId: link.id },
     });
     expect(rollup?.humanClicks).toBe(15);
+  });
+
+  it("recovers cleanly from simulated mid-flush crashes (before persist and after commit) with zero lost or double-counted clicks", async () => {
+    const redisHealth = await pingRedis();
+    if (!redisHealth.connected) return;
+
+    const redis = getRedisClient()!;
+    await redis.del(CLICK_QUEUE_KEYS.queue, CLICK_QUEUE_KEYS.processing);
+
+    const { link } = await urlService.createUrl(
+      { originalUrl: "https://example.com/crash-safe", alias: "crash1" },
+      { userId }
+    );
+
+    // Case A: Crash after atomic move to processing list, BEFORE DB persist
+    for (let i = 0; i < 4; i++) {
+      await redis.rpush(
+        CLICK_QUEUE_KEYS.queue,
+        JSON.stringify({
+          eventId: `crash-before-${i}-${Date.now()}`,
+          shortUrlId: link.id,
+          clickedAt: new Date().toISOString(),
+          referrerHost: null,
+          referrerUrl: null,
+          country: "US",
+          region: "unknown",
+          city: "unknown",
+          deviceType: "desktop",
+          browser: "Chrome",
+          os: "Windows",
+          isBot: false,
+          visitorHash: `v-before-${i}`,
+          source: null,
+          utmSource: null,
+          utmMedium: null,
+          utmCampaign: null,
+          variantId: null,
+        })
+      );
+    }
+
+    await expect(
+      drainRedisClickQueue({ simulateCrashBeforeAck: true })
+    ).rejects.toThrow(/Simulated worker crash before DB persist/);
+
+    // Items are safely preserved in processing list; DB still has 0
+    expect(await redis.llen(CLICK_QUEUE_KEYS.processing)).toBe(4);
+    expect((await prisma.shortUrl.findUnique({ where: { id: link.id } }))?.clickCount).toBe(0);
+
+    // Recovery drain inserts all 4 exactly once
+    await drainRedisClickQueue();
+    expect(await redis.llen(CLICK_QUEUE_KEYS.processing)).toBe(0);
+    expect((await prisma.shortUrl.findUnique({ where: { id: link.id } }))?.clickCount).toBe(4);
+
+    // Case B: Crash AFTER DB commit, BEFORE clearing processing list
+    for (let i = 0; i < 3; i++) {
+      await redis.rpush(
+        CLICK_QUEUE_KEYS.queue,
+        JSON.stringify({
+          eventId: `crash-after-${i}-${Date.now()}`,
+          shortUrlId: link.id,
+          clickedAt: new Date().toISOString(),
+          referrerHost: null,
+          referrerUrl: null,
+          country: "GB",
+          region: "unknown",
+          city: "unknown",
+          deviceType: "mobile",
+          browser: "Safari",
+          os: "iOS",
+          isBot: false,
+          visitorHash: `v-after-${i}`,
+          source: null,
+          utmSource: null,
+          utmMedium: null,
+          utmCampaign: null,
+          variantId: null,
+        })
+      );
+    }
+
+    await expect(
+      drainRedisClickQueue({ simulateCrashAfterCommit: true })
+    ).rejects.toThrow(/Simulated worker crash after DB commit/);
+
+    // DB already committed the 3 new rows (4 + 3 = 7), and processing list still holds them
+    expect(await redis.llen(CLICK_QUEUE_KEYS.processing)).toBe(3);
+    expect((await prisma.shortUrl.findUnique({ where: { id: link.id } }))?.clickCount).toBe(7);
+
+    // Recovery drain sees conflict on eventId and MUST NOT double-count (remains 7)
+    await drainRedisClickQueue();
+    expect(await redis.llen(CLICK_QUEUE_KEYS.processing)).toBe(0);
+    expect((await prisma.shortUrl.findUnique({ where: { id: link.id } }))?.clickCount).toBe(7);
+    expect(await prisma.clickEvent.count({ where: { shortUrlId: link.id } })).toBe(7);
   });
 });
