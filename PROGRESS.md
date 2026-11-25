@@ -20,14 +20,13 @@
 | 7 | Frontend: design system, landing, auth, dashboard, link CRUD | Done | `b33d064` | Theme toggle, landing shortener, auth flows, dashboard, mobile cards, settings |
 | 8 | Analytics collection + dashboards + QR | Done | `b33d064` | Overview + per-link SQL analytics, Recharts, heatmap, PNG/SVG QR studio |
 | — | **Core Checkpoint (`v0.1-core`)** | **Done** | `b33d064` | 8/8 Vitest files (63/63), 4/4 Playwright E2E + axe, build green |
-| 9 | Redis cache, queue, rollups, k6 load tests | Done | pending | Redis cache-aside + click queue, `EXPLAIN ANALYZE`, k6 before/after benchmarks |
-| 10 | Security hardening, rate limiting, headers, audit | In Progress | - | Sliding-window rate limiter, CSP/security headers, `SECURITY.md`, audit |
-| 11 | Wow features (Section 4, priority order) | Pending | - | |
+| 9 | Redis cache, queue, rollups, k6 load tests | Done | `fe4d7ac` | Redis cache-aside + click queue, `EXPLAIN ANALYZE`, k6 before/after benchmarks |
+| 10 | Security hardening, rate limiting, headers, audit | Done | pending | Sliding-window rate limiter, CSP/security headers, `SECURITY.md`, 70/70 tests |
+| 11 | Wow features (Section 4, priority order) | In Progress | - | SSE live feed, routing/A-B, UTM presets, previews, safety scan, API keys/OpenAPI, webhooks, bulk CSV, Cmd+K, bookmarklet, admin |
 | 12 | Full regression, accessibility, docs, CI, Docker prod image | Pending | - | |
 
-## Phase 9 Evidence
-- `npm test` -> 9 files, 66/66 passed (`tests/integration/cache-queue.test.ts` verified Redis cache hit + invalidation + queue batch flush + Redis-down direct DB fallback).
-- `node scripts/check-explain.mjs` -> verified `Index Scan using "ShortUrl_normalizedCode_key"` (`0.062 ms`), `ClickEvent` index scan (`0.195 ms`), and `DailyLinkStats_shortUrlId_day_key` (`0.034 ms`).
-- `k6 run tests/load/redirect-benchmark.k6.js` (25 VUs, 15s):
-  - Without Redis: redirect `p95 = 90.05 ms` (`med = 64.68 ms`), `60.1 req/s`, `0.00%` error rate.
-  - With Redis: redirect `p95 = 43.21 ms` (`med = 26.27 ms`), `105.2 req/s`, `0.00%` error rate.
+## Phase 10 Evidence
+- `npm run lint` -> 0 errors, 0 warnings
+- `npm run typecheck` -> `tsc --noEmit` passed
+- `npm test` -> 11 files, 70/70 tests passed (`tests/unit/rate-limit.test.ts` and `tests/integration/security-hardening.test.ts` verified sliding-window `429` + `Retry-After` + `X-RateLimit-*` headers, unlock brute-force throttling, and sanitized 500 responses).
+- `npm audit --omit=dev` -> 0 direct dependency vulnerabilities; 4 transitive advisories (`deepmerge-ts`, `effect`) inside `@prisma/config` documented in `docs/SECURITY.md`.

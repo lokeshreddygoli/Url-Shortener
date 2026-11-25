@@ -22,7 +22,10 @@ export interface ClickEventPayload {
   variantId: string | null;
 }
 
-const CLICK_QUEUE_KEY = "shortly:clicks:queue";
+const CLICK_QUEUE_KEY =
+  process.env.NODE_ENV === "test"
+    ? "shortly:test:clicks:queue"
+    : "shortly:clicks:queue";
 const BATCH_SIZE = 50;
 const FLUSH_INTERVAL_MS = 1000;
 
@@ -39,9 +42,19 @@ function trackPromise(p: Promise<void>) {
 export async function persistClickBatch(events: ClickEventPayload[]): Promise<void> {
   if (events.length === 0) return;
 
+  // Filter out events for links that have since been deleted so one deleted link cannot poison a batch
+  const candidateIds = Array.from(new Set(events.map((e) => e.shortUrlId)));
+  const existingLinks = await prisma.shortUrl.findMany({
+    where: { id: { in: candidateIds } },
+    select: { id: true },
+  });
+  const validIdSet = new Set(existingLinks.map((l) => l.id));
+  const validEvents = events.filter((e) => validIdSet.has(e.shortUrlId));
+  if (validEvents.length === 0) return;
+
   // Insert click events in a batch
   await prisma.clickEvent.createMany({
-    data: events.map((ev) => ({
+    data: validEvents.map((ev) => ({
       shortUrlId: ev.shortUrlId,
       clickedAt: new Date(ev.clickedAt),
       referrerHost: ev.referrerHost,
@@ -69,7 +82,7 @@ export async function persistClickBatch(events: ClickEventPayload[]): Promise<vo
     { shortUrlId: string; day: Date; total: number; human: number; bot: number; qr: number }
   >();
 
-  for (const ev of events) {
+  for (const ev of validEvents) {
     countsByLink.set(ev.shortUrlId, (countsByLink.get(ev.shortUrlId) ?? 0) + 1);
     const dayStr = ev.clickedAt.slice(0, 10);
     const key = `${ev.shortUrlId}:${dayStr}`;

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { resolveRedirect } from "@/server/services/redirect.service";
 import { renderStatusPageHtml } from "@/lib/status-pages";
+import { checkRateLimit, RATE_LIMITS, rateLimitHeaders } from "@/lib/rate-limit";
+import { extractClientIp } from "@/lib/request-meta";
 import { logger } from "@/lib/logger";
 
 interface RouteParams {
@@ -16,6 +18,28 @@ export async function GET(req: Request, { params }: RouteParams) {
   const { code } = await params;
 
   try {
+    const ip = extractClientIp(req.headers);
+    const rl = await checkRateLimit(
+      { ...RATE_LIMITS.REDIRECT, limit: Number(process.env.REDIRECT_RATE_LIMIT || 600) },
+      `ip:${ip}`
+    );
+    if (!rl.allowed) {
+      const html = renderStatusPageHtml({
+        statusCode: 429,
+        title: "Too Many Requests",
+        heading: "Slow down",
+        message: "You have exceeded the request rate limit. Please wait a moment and try again.",
+      });
+      return new NextResponse(html, {
+        status: 429,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          ...NOINDEX_HEADERS,
+          ...rateLimitHeaders(rl),
+        },
+      });
+    }
+
     const decision = await resolveRedirect(code, req);
 
     switch (decision.kind) {

@@ -33,9 +33,10 @@ export interface CachedLink {
 
 const LINK_TTL_SECONDS = 60;
 const NEG_TTL_SECONDS = 15;
+const PREFIX = process.env.NODE_ENV === "test" ? "shortly:test:" : "shortly:";
 
-const linkKey = (normalizedCode: string) => `shortly:link:${normalizedCode}`;
-const negKey = (normalizedCode: string) => `shortly:neg:${normalizedCode}`;
+const linkKey = (normalizedCode: string) => `${PREFIX}link:${normalizedCode}`;
+const negKey = (normalizedCode: string) => `${PREFIX}neg:${normalizedCode}`;
 
 export async function getCachedLink(
   normalizedCode: string
