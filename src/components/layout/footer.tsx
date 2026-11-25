@@ -16,16 +16,16 @@ export function Footer() {
         </div>
 
         <nav className="flex flex-wrap items-center gap-5 text-sm text-zinc-600 dark:text-zinc-400">
-          <Link href="/dashboard" className="hover:text-zinc-900 dark:hover:text-zinc-100">
+          <Link href="/dashboard" prefetch={false} className="hover:text-zinc-900 dark:hover:text-zinc-100">
             Dashboard
           </Link>
-          <Link href="/docs" className="hover:text-zinc-900 dark:hover:text-zinc-100">
+          <Link href="/docs" prefetch={false} className="hover:text-zinc-900 dark:hover:text-zinc-100">
             API Docs
           </Link>
-          <Link href="/login" className="hover:text-zinc-900 dark:hover:text-zinc-100">
+          <Link href="/login" prefetch={false} className="hover:text-zinc-900 dark:hover:text-zinc-100">
             Sign In
           </Link>
-          <Link href="/register" className="hover:text-zinc-900 dark:hover:text-zinc-100">
+          <Link href="/register" prefetch={false} className="hover:text-zinc-900 dark:hover:text-zinc-100">
             Create Account
           </Link>
         </nav>

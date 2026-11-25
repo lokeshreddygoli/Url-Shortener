@@ -196,7 +196,7 @@ export default function HomePage() {
                 Create an account to claim guest links, build UTM presets, and unlock API access.
               </p>
             </div>
-            <Link href="/register">
+            <Link href="/register" prefetch={false}>
               <Button size="lg">Create free account</Button>
             </Link>
           </div>

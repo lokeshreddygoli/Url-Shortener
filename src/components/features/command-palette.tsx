@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 
-export function CommandPalette() {
+export function CommandPalette({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(defaultOpen);
   const [query, setQuery] = React.useState("");
 
   React.useEffect(() => {

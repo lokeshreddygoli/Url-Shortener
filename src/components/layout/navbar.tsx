@@ -33,6 +33,7 @@ export function Navbar() {
         <div className="flex items-center gap-8">
           <Link
             href="/"
+            prefetch={false}
             className="flex items-center gap-2 text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
           >
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
@@ -48,6 +49,7 @@ export function Navbar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   className={cn(
                     "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
                     active
@@ -70,7 +72,7 @@ export function Navbar() {
               <div className="h-9 w-24 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800" />
             ) : session ? (
               <>
-                <Link href="/settings">
+                <Link href="/settings" prefetch={false}>
                   <Button variant="ghost" size="sm" aria-label="Account settings">
                     <Settings className="h-4 w-4" />
                     <span className="max-w-[140px] truncate">
@@ -89,12 +91,12 @@ export function Navbar() {
               </>
             ) : (
               <>
-                <Link href="/login">
+                <Link href="/login" prefetch={false}>
                   <Button variant="ghost" size="sm">
                     Sign in
                   </Button>
                 </Link>
-                <Link href="/register">
+                <Link href="/register" prefetch={false}>
                   <Button size="sm">Get started</Button>
                 </Link>
               </>
@@ -120,6 +122,7 @@ export function Navbar() {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 onClick={() => setMobileOpen(false)}
                 className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
               >
@@ -137,12 +140,12 @@ export function Navbar() {
               </Button>
             ) : (
               <>
-                <Link href="/login" onClick={() => setMobileOpen(false)}>
+                <Link href="/login" prefetch={false} onClick={() => setMobileOpen(false)}>
                   <Button variant="outline" className="w-full">
                     Sign in
                   </Button>
                 </Link>
-                <Link href="/register" onClick={() => setMobileOpen(false)}>
+                <Link href="/register" prefetch={false} onClick={() => setMobileOpen(false)}>
                   <Button className="w-full">Get started</Button>
                 </Link>
               </>
