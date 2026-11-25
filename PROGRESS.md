@@ -3,17 +3,17 @@
 ## Environment & Tooling Findings
 - OS: Windows
 - Node.js: v22.14.0 (`npm` 10.9.2)
-- Git: 2.49.0 (initialized `main` branch in `d:\url_shortner`)
-- Docker: v26.1.4 + Compose v2.29.2 installed (daemon check pending startup)
-- Native Postgres/Redis/k6: not pre-installed natively; Postgres & Redis will run via Docker Compose (and k6 via Docker `grafana/k6` if needed).
+- Git: 2.49.0 (`main` branch in `d:\url_shortner`)
+- Docker: v26.1.4 CLI installed; Docker daemon is not running on this host. `docker-compose.yml` is provided for Docker hosts, and `scripts/local-db.mjs` runs real PostgreSQL 17.12 (`embedded-postgres`) locally on `localhost:5432` with `shortly` and `shortly_test` databases.
+- Redis: Not running on `localhost:6379` by default; `src/lib/redis.ts` degrades gracefully when Redis is unavailable (`READY 200` with `status: "degraded"`).
 
 ## Phase Status
 
 | Phase | Name | Status | Commit | Notes |
 |---|---|---|---|---|
-| 1 | Repo inspection, architecture, ADRs, env validation | In Progress | - | Architecture, ADRs, `.env.example`, `PROGRESS.md` created; `src/lib/env.ts` to be added with Next.js setup in Phase 2 |
-| 2 | Setup: Next.js, Tailwind, shadcn, Prisma, Docker Compose | Pending | - | |
-| 3 | Schema + migrations + seed | Pending | - | |
+| 1 | Repo inspection, architecture, ADRs, env validation | Done | `bb7782c` | Architecture, 4 ADRs, `.env.example`, `PROGRESS.md` |
+| 2 | Setup: Next.js, Tailwind, Prisma, local PG, health/ready | Done | pending | Next.js 16.4.6, Prisma 6.19.3, Zod 4.6.7, Pino, Vitest, lint/typecheck/build/smoke passed |
+| 3 | Schema + migrations + seed | In Progress | - | Full relational schema, migrations, and separate `seed-demo.ts` |
 | 4 | Services + REST API + error envelope | Pending | - | |
 | 5 | Code generation + redirect engine | Pending | - | |
 | 6 | Auth + authorization | Pending | - | |
@@ -25,15 +25,18 @@
 | 11 | Wow features (Section 4, priority order) | Pending | - | |
 | 12 | Full regression, accessibility, docs, CI, Docker prod image | Pending | - | |
 
+## Phase 2 Evidence
+- `npx prisma generate` -> generated Prisma Client v6.19.3.
+- `npm run lint` -> passed with 0 warnings/errors.
+- `npm run typecheck` -> `tsc --noEmit` passed with 0 errors.
+- `npm test` -> `tests/unit/env.test.ts` (2/2 passed).
+- `npm run build` -> Next.js 16.4.6 Turbopack production build succeeded.
+- Smoke test (`next start -p 3099`):
+  - `GET /api/health` -> `200` `{"data":{"status":"ok",...}}`
+  - `GET /api/ready` -> `200` `{"data":{"status":"degraded","checks":{"database":{"connected":true,"latencyMs":78},"redis":{"configured":true,"connected":false,"latencyMs":null}}}}`
+
 ## Key Architectural Decisions
 - **ADR-001:** Default `302 Found` with `Cache-Control: no-store` for accurate analytics; optional `307` and opt-in `301` with browser caching warning.
-- **ADR-002:** 7-character Base62 short codes generated via `crypto.randomInt` with bounded collision retries ($62^7 \approx 3.52 \times 10^{12}$ space).
+- **ADR-002:** 7-character Base62 short codes generated via `crypto.randomInt` with bounded collision retries and case-insensitive normalized uniqueness.
 - **ADR-003:** Redis cache-aside with explicit invalidation on link update/disable/delete + short-TTL negative caching for 404s.
 - **ADR-004:** Non-blocking click ingestion via Redis queue + batch DB inserts with graceful fallback to direct DB insert when Redis is unavailable; salted daily-rotating visitor hashes (zero raw IP persistence).
-
-## Commands Run
-- `Get-ChildItem -Force; node -v; npm -v; git --version; docker --version; docker compose version` (verified clean directory, Node v22.14.0, npm 10.9.2, Docker 26.1.4)
-- `git init -b main`
-
-## Known Issues / Blockers
-- Docker daemon was not running during initial inspection; will start Docker Desktop in Phase 2 before spinning up PostgreSQL and Redis containers.
