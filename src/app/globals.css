@@ -1,25 +1,35 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #fafafa;
+  --surface: #ffffff;
+  --surface-muted: #f4f4f5;
   --foreground: #09090b;
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
+  --muted-foreground: #52525b;
   --border: #e4e4e7;
   --accent: #4f46e5;
+  --accent-hover: #4338ca;
   --accent-foreground: #ffffff;
+  --ring: #6366f1;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --foreground: #fafafa;
-    --muted: #18181b;
-    --muted-foreground: #a1a1aa;
-    --border: #27272a;
-    --accent: #6366f1;
-    --accent-foreground: #ffffff;
-  }
+.dark {
+  --background: #09090b;
+  --surface: #111114;
+  --surface-muted: #18181b;
+  --foreground: #fafafa;
+  --muted-foreground: #a1a1aa;
+  --border: #27272a;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-foreground: #ffffff;
+  --ring: #818cf8;
+}
+
+* {
+  border-color: var(--border);
 }
 
 body {
@@ -27,4 +37,13 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
