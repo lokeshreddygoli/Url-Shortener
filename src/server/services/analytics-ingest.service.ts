@@ -133,8 +133,14 @@ export async function drainRedisClickQueue(): Promise<number> {
     if (redis.status === "wait") await redis.connect();
 
     while (true) {
-      const items = await redis.lpop(CLICK_QUEUE_KEY, BATCH_SIZE);
-      if (!items || items.length === 0) break;
+      const txResult = await redis
+        .multi()
+        .lrange(CLICK_QUEUE_KEY, 0, BATCH_SIZE - 1)
+        .ltrim(CLICK_QUEUE_KEY, BATCH_SIZE, -1)
+        .exec();
+
+      const items = (txResult?.[0]?.[1] as string[] | undefined) ?? [];
+      if (items.length === 0) break;
 
       const parsed: ClickEventPayload[] = [];
       for (const raw of items) {

@@ -63,7 +63,24 @@ flowchart LR
 | **PostgreSQL down** | `/api/health` stays `200` (liveness); `/api/ready` returns `503`; API returns structured `503`/`500` JSON with request ID; UI/redirect renders clean error page without stack traces or crashes. |
 | **External Safety/Email API down** | Safety scanner falls back to local heuristic rules; email transport falls back to configured dev/console transport or logs error cleanly. |
 
-## 5. Scaling to 1 Billion Links
+## 5. Performance Benchmarks & Index Verification (Measured)
+
+### k6 Load Test Results (25 VUs: 20 redirect VUs + 5 create VUs, 15s)
+
+| Mode | Redirect Avg | Redirect p50 | Redirect p95 | Throughput (mixed) | Error Rate |
+|---|---|---|---|---|---|
+| PostgreSQL Direct (Redis Off) | 67.89 ms | 64.68 ms | 90.05 ms | 60.1 req/s | 0.00% |
+| Redis Cache-Aside + Click Queue | 27.93 ms | 26.27 ms | **43.21 ms** | 105.2 req/s | 0.00% |
+
+### PostgreSQL `EXPLAIN ANALYZE` Index Verification
+- `ShortUrl` code lookup: `Index Scan using "ShortUrl_normalizedCode_key"` (`0.062 ms` execution).
+- `ClickEvent` time-series: `Index Scan` on `shortUrlId` (`0.195 ms` execution).
+- `DailyLinkStats` rollup read: `Index Scan Backward using "DailyLinkStats_shortUrlId_day_key"` (`0.034 ms` execution).
+
+### Rollup Table Trade-offs
+`DailyLinkStats` stores pre-aggregated daily counters (`totalClicks`, `humanClicks`, `botClicks`, `qrClicks`) updated in batch alongside `ClickEvent` inserts. This keeps multi-month overview queries O(days) instead of scanning millions of raw `ClickEvent` rows, at the trade-off of slightly heavier batch writes and daily granularity (intra-day `24h` charts still query indexed `ClickEvent` rows directly).
+
+## 6. Scaling to 1 Billion Links
 
 1. **Read/Write Separation & Caching:** Redirects are >95% read traffic. Multi-tier caching (CDN/edge + regional Redis cluster) handles hot codes (`code -> destination + rules`) with sub-10ms lookups, while invalidations publish via Redis Pub/Sub.
 2. **Code Space:** 7-char Base62 provides $62^7 \approx 3.52 \times 10^{12}$ combinations. At 1B active links, occupancy is $< 0.03\%$, keeping random collision probability negligible ($< 0.0003$). Extending to 8 chars expands space to $2.18 \times 10^{14}$.
