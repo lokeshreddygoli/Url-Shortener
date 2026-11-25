@@ -1,4 +1,5 @@
 import { getRequestId, handleApiError, ok, parseJsonBody } from "@/lib/api-response";
+import { assertSameOriginIfBrowser } from "@/lib/csrf";
 import { getRequestAuthContext } from "@/server/auth/request-context";
 import { urlService } from "@/server/services/url.service";
 
@@ -18,6 +19,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
+    assertSameOriginIfBrowser(req);
     const caller = await getRequestAuthContext(req);
     const body = await parseJsonBody(req);
     const result = await urlService.createUrl(body, caller);

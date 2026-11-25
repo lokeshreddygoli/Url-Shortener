@@ -7,6 +7,11 @@ export default defineConfig({
     include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
     fileParallelism: false,
     testTimeout: 30000,
+    server: {
+      deps: {
+        inline: ["next-auth", "@auth/core"],
+      },
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
@@ -16,6 +21,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "next/server": path.resolve(__dirname, "./node_modules/next/server.js"),
+      "next/headers": path.resolve(__dirname, "./node_modules/next/headers.js"),
+      "next/navigation": path.resolve(__dirname, "./node_modules/next/navigation.js"),
     },
   },
 });

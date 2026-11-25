@@ -15,9 +15,9 @@
 | 2 | Setup: Next.js, Tailwind, Prisma, local PG, health/ready | Done | `d23d751` | Next.js 16.4.6, Prisma 6.19.3, Zod 4.6.7, Pino, Vitest |
 | 3 | Schema + migrations + seed | Done | `17bccac` | Initial migration `20261125164841_init` applied to `shortly` and `shortly_test` |
 | 4 | Services + REST API + error envelope | Done | `17bccac` | Validators, repository, services, REST CRUD, 51 tests green |
-| 5 | Code generation + redirect engine | Done | pending | `GET /:code`, UA/bot parser, non-blocking click ingestion, 404/410 pages |
-| 6 | Auth + authorization | In Progress | - | Auth.js v5, email/password + optional Google OAuth, reset/profile/delete, IDOR matrix |
-| 7 | Frontend: design system, landing, auth, dashboard, link CRUD | Pending | - | |
+| 5 | Code generation + redirect engine | Done | `0d1ef8e` | `GET /:code`, UA/bot parser, non-blocking click ingestion, 404/410 pages |
+| 6 | Auth + authorization | Done | pending | Auth.js v5, credentials + lockout + reset + profile + cascade delete + IDOR matrix |
+| 7 | Frontend: design system, landing, auth, dashboard, link CRUD | In Progress | - | |
 | 8 | Analytics collection + dashboards + QR | Pending | - | |
 | — | Core Checkpoint (`v0.1-core`) | Pending | - | |
 | 9 | Redis cache, queue, rollups, k6 load tests | Pending | - | |
@@ -25,13 +25,8 @@
 | 11 | Wow features (Section 4, priority order) | Pending | - | |
 | 12 | Full regression, accessibility, docs, CI, Docker prod image | Pending | - | |
 
-## Phase 5 Evidence
-- `npm run lint` -> 0 errors/warnings
+## Phase 6 Evidence
+- `npm run lint` -> 0 errors, 0 warnings
 - `npm run typecheck` -> `tsc --noEmit` passed
-- `npm test` -> 6 files, 59/59 passed (`tests/unit/ua.test.ts`, `tests/integration/redirect-engine.test.ts` added)
+- `npm test` -> 7 files, 61/61 tests passed (`tests/integration/auth-idor.test.ts` verified register, 409 duplicate email, 5-attempt lockout, password reset, full IDOR matrix across users, CSRF origin check, and cascade account deletion)
 - `npm run build` -> Next.js 16.4.6 production build succeeded
-- HTTP smoke test (`next start -p 3099`):
-  - `POST /api/urls` -> `201 smoke302`
-  - `GET /smoke302` -> `302 Location: https://example.com/smoke-target Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate`
-  - `GET /doesnotexist99` -> `404`
-  - `GET /smoke302` (disabled) -> `410`

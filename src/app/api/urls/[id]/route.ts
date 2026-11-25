@@ -5,6 +5,7 @@ import {
   ok,
   parseJsonBody,
 } from "@/lib/api-response";
+import { assertSameOriginIfBrowser } from "@/lib/csrf";
 import { getRequestAuthContext } from "@/server/auth/request-context";
 import { urlService } from "@/server/services/url.service";
 
@@ -27,6 +28,7 @@ export async function GET(req: Request, { params }: RouteParams) {
 export async function PATCH(req: Request, { params }: RouteParams) {
   const requestId = getRequestId(req);
   try {
+    assertSameOriginIfBrowser(req);
     const { id } = await params;
     const caller = await getRequestAuthContext(req);
     const body = await parseJsonBody(req);
@@ -40,6 +42,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 export async function DELETE(req: Request, { params }: RouteParams) {
   const requestId = getRequestId(req);
   try {
+    assertSameOriginIfBrowser(req);
     const { id } = await params;
     const caller = await getRequestAuthContext(req);
     await urlService.deleteUrl(id, caller);

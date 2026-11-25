@@ -1,3 +1,5 @@
+import { auth } from "@/auth";
+import { AppError } from "@/lib/errors";
 import type { CallerContext } from "@/server/services/url.service";
 
 export interface AuthContext extends CallerContext {
@@ -8,7 +10,7 @@ export interface AuthContext extends CallerContext {
 
 /**
  * Resolves the caller identity for API routes.
- * Wired to Auth.js session in Phase 6 and API keys in Phase 11.
+ * Supports Auth.js session cookies and API keys (Phase 11).
  */
 export async function getRequestAuthContext(req?: Request): Promise<AuthContext> {
   const authHeader = req?.headers.get("authorization");
@@ -16,9 +18,30 @@ export async function getRequestAuthContext(req?: Request): Promise<AuthContext>
     // Phase 11 API key verification hook
   }
 
+  try {
+    const session = await auth();
+    if (session?.user?.id) {
+      return {
+        userId: session.user.id,
+        isAdmin: session.user.role === "ADMIN",
+        via: "session",
+      };
+    }
+  } catch {
+    // Outside Next.js request context (e.g. direct unit/service test invocation)
+  }
+
   return {
     userId: null,
     isAdmin: false,
     via: "guest",
   };
+}
+
+export async function requireAuthenticatedContext(req?: Request): Promise<AuthContext> {
+  const ctx = await getRequestAuthContext(req);
+  if (!ctx.userId) {
+    throw new AppError(401, "UNAUTHENTICATED", "Authentication required");
+  }
+  return ctx;
 }
