@@ -3,6 +3,7 @@ import { getRequestId, handleApiError, ok, parseJsonBody } from "@/lib/api-respo
 import { assertSameOriginIfBrowser } from "@/lib/csrf";
 import { AppError } from "@/lib/errors";
 import { urlRepository } from "@/server/repositories/url.repository";
+import { isSecureCookieEnv } from "@/lib/cookie-options";
 import { createGateCookieValue } from "@/server/services/redirect.service";
 
 const proceedSchema = z.object({
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
       sameSite: "lax",
       path: "/",
       maxAge: 300,
-      secure: process.env.NODE_ENV === "production",
+      secure: isSecureCookieEnv(),
     });
     return res;
   } catch (err) {

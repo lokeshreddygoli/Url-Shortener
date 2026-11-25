@@ -56,8 +56,16 @@ test.describe("Shortly Core E2E Flows", () => {
     expect(homeHeadersRes.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
 
     await page.goto("/docs");
-    await expect(page.getByText(/Shortly REST API/i)).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Shortly/i })
+    ).toBeVisible();
     await expect(page.getByText("/api/urls").first()).toBeVisible();
+
+    // Bookmarklet ?url= prefill on landing
+    await page.goto("/?url=https%3A%2F%2Fexample.com%2Fbookmarklet-test");
+    await expect(page.getByLabel("Destination URL")).toHaveValue(
+      "https://example.com/bookmarklet-test"
+    );
 
     expect(consoleErrors).toEqual([]);
   });
@@ -74,7 +82,11 @@ test.describe("Shortly Core E2E Flows", () => {
 
     // 1. Register
     await page.goto("/register");
-    await page.getByLabel("Full name").fill("E2E Tester");
+    const nameInput = page.getByLabel("Full name");
+    await nameInput.waitFor({ state: "visible" });
+    await nameInput.click();
+    await nameInput.fill("E2E Tester");
+    await expect(nameInput).toHaveValue("E2E Tester");
     await page.getByLabel("Email address").fill(email);
     await page.getByLabel(/Password/).fill("E2EPassword123!");
     await page.getByRole("button", { name: /create account/i }).click();
@@ -179,13 +191,31 @@ test.describe("Shortly Core E2E Flows", () => {
     const pwPage = await pwContext.newPage();
     await pwPage.goto(`${baseURL}/${alias2}`);
     await pwPage.waitForURL(`**/unlock/${alias2}`);
-    await pwPage.getByLabel("Link password").fill("Secret123");
+    const pwInput = pwPage.getByLabel("Link password");
+    await pwInput.waitFor({ state: "visible" });
+    await pwInput.click();
+    await pwInput.fill("Secret123");
+    await expect(pwInput).toHaveValue("Secret123");
     await pwPage.getByRole("button", { name: /unlock & continue/i }).click();
-    await pwPage.waitForURL("https://example.org/e2e-dest");
-    await expect(pwPage.url()).toBe("https://example.org/e2e-dest");
+    await pwPage.waitForURL("https://example.org/e2e-dest", {
+      waitUntil: "commit",
+    });
+    expect(pwPage.url()).toBe("https://example.org/e2e-dest");
     await pwContext.close();
 
-    // 7. Delete link -> verify gone (404)
+    // 7. Settings page & Admin RBAC check (regular user redirected from /admin)
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Account Settings" })).toBeVisible();
+    await page.goto("/admin");
+    await page.waitForURL("**/dashboard");
+
+    // 8. Delete link -> verify gone (404)
+    await page
+      .getByRole("link", { name: `/${alias2}` })
+      .and(page.locator(":visible"))
+      .first()
+      .click();
+    await page.waitForURL("**/dashboard/links/**");
     await page.getByRole("button", { name: /delete link/i }).click();
     await page.waitForURL("**/dashboard");
 

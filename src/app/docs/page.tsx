@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { BookOpen, Bookmark, ExternalLink } from "lucide-react";
+import { BookOpen, Bookmark, Check, Copy, ExternalLink } from "lucide-react";
 import { Badge, Card, Skeleton } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface OpenApiSpec {
   openapi: string;
@@ -16,6 +17,8 @@ interface OpenApiSpec {
 export default function DocsPage() {
   const [spec, setSpec] = React.useState<OpenApiSpec | null>(null);
   const [origin, setOrigin] = React.useState("");
+  const [copiedBookmarklet, setCopiedBookmarklet] = React.useState(false);
+  const bookmarkletRef = React.useRef<HTMLAnchorElement | null>(null);
 
   React.useEffect(() => {
     fetch("/api/openapi.json")
@@ -30,7 +33,13 @@ export default function DocsPage() {
   }, []);
 
   const targetOrigin = origin || "https://your-shortly-domain";
-  const bookmarkletHref = `javascript:(function(){var u=encodeURIComponent(location.href);window.open('${targetOrigin}/?url='+u,'_blank');})();`;
+  const bookmarkletCode = `javascript:(function(){var u=encodeURIComponent(location.href);window.open('${targetOrigin}/?url='+u,'_blank');})();`;
+
+  React.useEffect(() => {
+    if (bookmarkletRef.current) {
+      bookmarkletRef.current.setAttribute("href", bookmarkletCode);
+    }
+  }, [bookmarkletCode]);
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-12 sm:px-6 space-y-8">
@@ -69,15 +78,29 @@ export default function DocsPage() {
           <h2 className="text-base font-semibold">Browser Bookmarklet</h2>
         </div>
         <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-          Drag this link to your bookmarks bar to shorten the current browser tab in one click:
+          Drag this button to your bookmarks bar (or copy the snippet) to shorten the current browser tab in one click:
         </p>
-        <div className="mt-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <a
-            href={bookmarkletHref}
+            ref={bookmarkletRef}
+            href="#bookmarklet"
+            onClick={(e) => e.preventDefault()}
             className="inline-flex items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/60 dark:text-indigo-300"
           >
             Shorten with Shortly
           </a>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={async () => {
+              await navigator.clipboard.writeText(bookmarkletCode);
+              setCopiedBookmarklet(true);
+              setTimeout(() => setCopiedBookmarklet(false), 1500);
+            }}
+          >
+            {copiedBookmarklet ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copiedBookmarklet ? "Copied snippet" : "Copy bookmarklet"}
+          </Button>
         </div>
       </Card>
 

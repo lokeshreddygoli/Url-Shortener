@@ -6,6 +6,7 @@ import { AppError } from "@/lib/errors";
 import { checkRateLimit, RATE_LIMITS, rateLimitHeaders } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/request-meta";
 import { urlRepository } from "@/server/repositories/url.repository";
+import { isSecureCookieEnv } from "@/lib/cookie-options";
 import { createGateCookieValue } from "@/server/services/redirect.service";
 
 const unlockSchema = z.object({
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
       sameSite: "lax",
       path: "/",
       maxAge: 300,
-      secure: process.env.NODE_ENV === "production",
+      secure: isSecureCookieEnv(),
     });
     return res;
   } catch (err) {

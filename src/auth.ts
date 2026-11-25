@@ -4,6 +4,7 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
+import { isSecureCookieEnv } from "@/lib/cookie-options";
 import { authService } from "@/server/services/auth.service";
 
 declare module "next-auth" {
@@ -64,7 +65,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         httpOnly: true,
         sameSite: "lax",
         path: "/",
-        secure: process.env.NODE_ENV === "production",
+        secure: isSecureCookieEnv(),
       },
     },
   },
