@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getRedisClient } from "@/lib/redis";
+import { CLICK_MILESTONES, webhookService } from "@/server/services/webhook.service";
 
 export interface ClickEventPayload {
   shortUrlId: string;
@@ -101,14 +102,18 @@ export async function persistClickBatch(events: ClickEventPayload[]): Promise<vo
     dailyMap.set(key, existing);
   }
 
-  await Promise.all([
+  const updatedLinks = await Promise.all([
     ...Array.from(countsByLink.entries()).map(([shortUrlId, count]) =>
       prisma.shortUrl.update({
         where: { id: shortUrlId },
         data: { clickCount: { increment: count } },
+        select: { id: true, userId: true, code: true, clickCount: true },
       })
     ),
-    ...Array.from(dailyMap.values()).map((d) =>
+  ]);
+
+  await Promise.all(
+    Array.from(dailyMap.values()).map((d) =>
       prisma.dailyLinkStats.upsert({
         where: {
           shortUrlId_day: {
@@ -131,8 +136,25 @@ export async function persistClickBatch(events: ClickEventPayload[]): Promise<vo
           qrClicks: d.qr,
         },
       })
-    ),
-  ]);
+    )
+  );
+
+  // Fire click.milestone webhooks if a batch crossed a milestone
+  for (const link of updatedLinks) {
+    if (!link.userId) continue;
+    const added = countsByLink.get(link.id) ?? 0;
+    const prev = link.clickCount - added;
+    for (const milestone of CLICK_MILESTONES) {
+      if (prev < milestone && link.clickCount >= milestone) {
+        void webhookService.dispatchEvent(link.userId, "click.milestone", {
+          shortUrlId: link.id,
+          code: link.code,
+          milestone,
+          clickCount: link.clickCount,
+        });
+      }
+    }
+  }
 }
 
 export async function drainRedisClickQueue(): Promise<number> {

@@ -15,6 +15,7 @@ import {
   BarChart3,
   Check,
   Copy,
+  Download,
   ExternalLink,
   Link2,
   Lock,
@@ -23,6 +24,7 @@ import {
   QrCode,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { Badge, Card, Skeleton } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -95,6 +97,14 @@ export function DashboardClient({ userName }: { userName: string }) {
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [csvText, setCsvText] = React.useState("originalUrl,alias,title\nhttps://example.com/demo-1,,Example 1");
+  const [importResult, setImportResult] = React.useState<{
+    createdCount: number;
+    failedCount: number;
+    errors: Array<{ row: number; message: string }>;
+  } | null>(null);
+  const [importing, setImporting] = React.useState(false);
   const [editingLink, setEditingLink] = React.useState<LinkItem | null>(null);
   const [deletingLink, setDeletingLink] = React.useState<LinkItem | null>(null);
   const [nowMs, setNowMs] = React.useState(0);
@@ -253,10 +263,22 @@ export function DashboardClient({ userName }: { userName: string }) {
             Welcome back, {userName}. Monitor performance and manage your links.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          New link
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <a href="/api/urls/export?format=csv" download="shortly-links.csv">
+            <Button variant="outline" size="sm">
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </Button>
+          </a>
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <Upload className="h-3.5 w-3.5" />
+            Import CSV
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            New link
+          </Button>
+        </div>
       </div>
 
       {/* KPI cards */}
@@ -721,6 +743,70 @@ export function DashboardClient({ userName }: { userName: string }) {
       </Card>
 
       {/* Modals */}
+      <Modal
+        open={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+          setImportResult(null);
+        }}
+        title="Bulk import links (CSV)"
+        description="Paste CSV rows with columns: originalUrl,alias,title"
+      >
+        <div className="space-y-3">
+          <textarea
+            rows={6}
+            value={csvText}
+            onChange={(e) => setCsvText(e.target.value)}
+            className="w-full rounded-lg border border-zinc-200 bg-white p-3 font-mono text-xs dark:border-zinc-800 dark:bg-zinc-950"
+          />
+          {importResult && (
+            <div className="rounded-lg border border-zinc-200 p-3 text-xs dark:border-zinc-800">
+              <p className="font-medium">
+                Created: {importResult.createdCount} • Failed: {importResult.failedCount}
+              </p>
+              {importResult.errors.map((err) => (
+                <p key={err.row} className="mt-1 text-rose-600 dark:text-rose-400">
+                  Row {err.row}: {err.message}
+                </p>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(false)}>
+              Close
+            </Button>
+            <Button
+              disabled={importing}
+              onClick={async () => {
+                setImporting(true);
+                try {
+                  const res = await fetch("/api/urls/import", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ csv: csvText }),
+                  });
+                  const json = await res.json();
+                  if (res.ok && json.data) {
+                    setImportResult(json.data);
+                    toast({
+                      kind: "success",
+                      title: `Imported ${json.data.createdCount} link(s)`,
+                    });
+                    refreshAll();
+                  } else {
+                    toast({ kind: "error", title: json?.error?.message || "Import failed" });
+                  }
+                } finally {
+                  setImporting(false);
+                }
+              }}
+            >
+              {importing ? "Importing..." : "Run import"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}

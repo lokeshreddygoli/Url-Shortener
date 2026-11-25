@@ -14,13 +14,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ArrowLeft, Check, Copy, ExternalLink, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, ExternalLink, Globe, Radio, Route, Sparkles, Trash2 } from "lucide-react";
 import { Badge, Card, Skeleton } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { LinkForm } from "@/components/features/link-form";
 import { QrStudio } from "@/components/features/qr-studio";
 import { formatNumber, formatRelativeDate } from "@/lib/utils";
+
+interface LinkRuleItem {
+  id: string;
+  type: "DEVICE" | "COUNTRY" | "TIME_WINDOW" | "AB_SPLIT";
+  targetUrl: string;
+  device: string | null;
+  country: string | null;
+  weight: number | null;
+  label: string | null;
+}
 
 interface LinkDetail {
   id: string;
@@ -28,6 +39,9 @@ interface LinkDetail {
   code: string;
   shortUrl: string;
   title: string | null;
+  description: string | null;
+  faviconUrl: string | null;
+  ogImageUrl: string | null;
   redirectType: number;
   hasPassword: boolean;
   clickLimit: number | null;
@@ -35,6 +49,7 @@ interface LinkDetail {
   expiresAt: string | null;
   isActive: boolean;
   createdAt: string;
+  rules?: LinkRuleItem[];
 }
 
 interface LinkAnalytics {
@@ -84,6 +99,29 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
   const [loading, setLoading] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
 
+  // Live SSE feed state
+  const [liveCount, setLiveCount] = React.useState<number | null>(null);
+  const [liveEvents, setLiveEvents] = React.useState<
+    Array<{ id: string; clickedAt: string; deviceType: string; browser: string; country: string }>
+  >([]);
+
+  // Smart routing rule form state
+  const [ruleType, setRuleType] = React.useState<"DEVICE" | "COUNTRY" | "AB_SPLIT">("DEVICE");
+  const [ruleTargetUrl, setRuleTargetUrl] = React.useState("");
+  const [ruleDevice, setRuleDevice] = React.useState("mobile");
+  const [ruleCountry, setRuleCountry] = React.useState("US");
+  const [ruleWeight, setRuleWeight] = React.useState("50");
+
+  // UTM builder state
+  const [utmSource, setUtmSource] = React.useState("newsletter");
+  const [utmMedium, setUtmMedium] = React.useState("email");
+  const [utmCampaign, setUtmCampaign] = React.useState("launch");
+  const [utmPresets, setUtmPresets] = React.useState<
+    Array<{ id: string; name: string; utmSource: string | null; utmMedium: string | null; utmCampaign: string | null }>
+  >([]);
+  const [presetName, setPresetName] = React.useState("");
+  const [fetchingPreview, setFetchingPreview] = React.useState(false);
+
   const loadData = React.useCallback(async () => {
     try {
       const [linkRes, analyticsRes] = await Promise.all([
@@ -104,11 +142,13 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
     Promise.all([
       fetch(`/api/urls/${linkId}`).then((r) => r.json()),
       fetch(`/api/urls/${linkId}/analytics?range=${range}`).then((r) => r.json()),
+      fetch("/api/utm-presets").then((r) => r.json()).catch(() => null),
     ])
-      .then(([linkJson, analyticsJson]) => {
+      .then(([linkJson, analyticsJson, presetsJson]) => {
         if (!active) return;
         if (linkJson?.data) setLink(linkJson.data);
         if (analyticsJson?.data) setAnalytics(analyticsJson.data);
+        if (presetsJson?.data) setUtmPresets(presetsJson.data);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -117,6 +157,37 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
       active = false;
     };
   }, [linkId, range]);
+
+  React.useEffect(() => {
+    const es = new EventSource(`/api/urls/${linkId}/stream`);
+    es.addEventListener("clicks", (evt) => {
+      try {
+        const parsed = JSON.parse((evt as MessageEvent).data) as {
+          totalClicks: number;
+          items: Array<{
+            id: string;
+            clickedAt: string;
+            deviceType: string;
+            browser: string;
+            country: string;
+          }>;
+        };
+        setLiveCount(parsed.totalClicks);
+        setLiveEvents((prev) => [...parsed.items, ...prev].slice(0, 10));
+      } catch {
+        // Ignore parse error
+      }
+    });
+    es.addEventListener("heartbeat", (evt) => {
+      try {
+        const parsed = JSON.parse((evt as MessageEvent).data) as { totalClicks: number };
+        setLiveCount(parsed.totalClicks);
+      } catch {
+        // Ignore
+      }
+    });
+    return () => es.close();
+  }, [linkId]);
 
   async function copyUrl() {
     if (!link) return;
@@ -199,7 +270,35 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
             </a>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <a href={`/api/urls/${link.id}/analytics/export?format=csv`} download>
+              <Button variant="outline" size="sm">
+                <Download className="h-3.5 w-3.5" />
+                Export CSV
+              </Button>
+            </a>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={fetchingPreview}
+              onClick={async () => {
+                setFetchingPreview(true);
+                try {
+                  const res = await fetch(`/api/urls/${link.id}/preview`, { method: "POST" });
+                  if (res.ok) {
+                    toast({ kind: "success", title: "Link preview refreshed" });
+                    void loadData();
+                  } else {
+                    toast({ kind: "error", title: "Could not fetch destination preview" });
+                  }
+                } finally {
+                  setFetchingPreview(false);
+                }
+              }}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {fetchingPreview ? "Fetching..." : "Fetch preview"}
+            </Button>
             <Button variant="outline" size="sm" onClick={copyUrl}>
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               {copied ? "Copied" : "Copy short URL"}
@@ -209,6 +308,14 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
             </a>
           </div>
         </div>
+        {(link.title || link.description) && (
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs dark:border-zinc-800 dark:bg-zinc-950/60">
+            {link.title && <p className="font-semibold">{link.title}</p>}
+            {link.description && (
+              <p className="mt-0.5 text-zinc-600 dark:text-zinc-400">{link.description}</p>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* Range Selector + KPIs */}
@@ -412,6 +519,238 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
               }}
               onSuccess={() => void loadData()}
             />
+          </div>
+        </Card>
+      </div>
+
+      {/* Live SSE Click Stream + Smart Routing + UTM Builder */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Radio className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <h2 className="text-sm font-semibold">Live Click Stream (SSE)</h2>
+            </div>
+            <Badge tone="emerald">
+              {liveCount !== null ? `${formatNumber(liveCount)} total` : "Listening"}
+            </Badge>
+          </div>
+          {liveEvents.length === 0 ? (
+            <p className="mt-4 text-xs text-zinc-500">
+              Waiting for incoming clicks on /{link.code}...
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-1.5 text-xs">
+              {liveEvents.map((ev) => (
+                <li
+                  key={ev.id}
+                  className="flex items-center justify-between rounded border border-zinc-100 px-2.5 py-1.5 dark:border-zinc-800"
+                >
+                  <span>
+                    {ev.deviceType} • {ev.browser} • {ev.country}
+                  </span>
+                  <span className="text-zinc-400">{formatRelativeDate(ev.clickedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-2">
+            <Route className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            <h2 className="text-sm font-semibold">Smart Routing &amp; A/B Rules</h2>
+          </div>
+          <form
+            className="mt-3 space-y-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const payload: Record<string, unknown> = {
+                type: ruleType,
+                targetUrl: ruleTargetUrl.trim(),
+              };
+              if (ruleType === "DEVICE") payload.device = ruleDevice;
+              if (ruleType === "COUNTRY") payload.country = ruleCountry;
+              if (ruleType === "AB_SPLIT") payload.weight = Number(ruleWeight);
+              const res = await fetch(`/api/urls/${link.id}/rules`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              if (res.ok) {
+                setRuleTargetUrl("");
+                toast({ kind: "success", title: "Routing rule added" });
+                void loadData();
+              } else {
+                const j = await res.json();
+                toast({ kind: "error", title: j?.error?.message || "Failed to add rule" });
+              }
+            }}
+          >
+            <select
+              value={ruleType}
+              onChange={(e) => setRuleType(e.target.value as "DEVICE" | "COUNTRY" | "AB_SPLIT")}
+              className="h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
+            >
+              <option value="DEVICE">Device Routing</option>
+              <option value="COUNTRY">Country Routing</option>
+              <option value="AB_SPLIT">A/B Split Variant</option>
+            </select>
+            {ruleType === "DEVICE" && (
+              <select
+                value={ruleDevice}
+                onChange={(e) => setRuleDevice(e.target.value)}
+                className="h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
+              >
+                <option value="mobile">Mobile</option>
+                <option value="desktop">Desktop</option>
+                <option value="tablet">Tablet</option>
+              </select>
+            )}
+            {ruleType === "COUNTRY" && (
+              <Input
+                value={ruleCountry}
+                onChange={(e) => setRuleCountry(e.target.value.toUpperCase())}
+                placeholder="US"
+                maxLength={2}
+              />
+            )}
+            {ruleType === "AB_SPLIT" && (
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                value={ruleWeight}
+                onChange={(e) => setRuleWeight(e.target.value)}
+                placeholder="Weight (1-100)"
+              />
+            )}
+            <Input
+              type="url"
+              required
+              value={ruleTargetUrl}
+              onChange={(e) => setRuleTargetUrl(e.target.value)}
+              placeholder="https://example.com/variant"
+            />
+            <Button type="submit" size="sm" className="w-full">
+              Add rule
+            </Button>
+          </form>
+
+          <div className="mt-3 space-y-1.5 text-xs">
+            {(link.rules ?? []).map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between gap-2 rounded border border-zinc-200 px-2.5 py-1.5 dark:border-zinc-800"
+              >
+                <span className="truncate">
+                  <Badge>{r.type}</Badge>{" "}
+                  {r.device || r.country || (r.weight ? `${r.weight}%` : "")} → {r.targetUrl}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await fetch(`/api/urls/${link.id}/rules?ruleId=${r.id}`, {
+                      method: "DELETE",
+                    });
+                    void loadData();
+                  }}
+                  className="text-rose-600 hover:underline cursor-pointer"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            <h2 className="text-sm font-semibold">UTM Link Builder &amp; Presets</h2>
+          </div>
+          <div className="mt-3 space-y-2">
+            <Input
+              value={utmSource}
+              onChange={(e) => setUtmSource(e.target.value)}
+              placeholder="utm_source"
+            />
+            <Input
+              value={utmMedium}
+              onChange={(e) => setUtmMedium(e.target.value)}
+              placeholder="utm_medium"
+            />
+            <Input
+              value={utmCampaign}
+              onChange={(e) => setUtmCampaign(e.target.value)}
+              placeholder="utm_campaign"
+            />
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-2 font-mono text-[11px] break-all dark:border-zinc-800 dark:bg-zinc-950">
+              {`${link.shortUrl}?utm_source=${encodeURIComponent(utmSource)}&utm_medium=${encodeURIComponent(utmMedium)}&utm_campaign=${encodeURIComponent(utmCampaign)}`}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const built = `${link.shortUrl}?utm_source=${encodeURIComponent(utmSource)}&utm_medium=${encodeURIComponent(utmMedium)}&utm_campaign=${encodeURIComponent(utmCampaign)}`;
+                  void navigator.clipboard.writeText(built);
+                  toast({ kind: "info", title: "UTM link copied" });
+                }}
+              >
+                Copy UTM URL
+              </Button>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="Preset name"
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={async () => {
+                  if (!presetName.trim()) return;
+                  const res = await fetch("/api/utm-presets", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      name: presetName.trim(),
+                      utmSource,
+                      utmMedium,
+                      utmCampaign,
+                    }),
+                  });
+                  if (res.ok) {
+                    setPresetName("");
+                    const j = await fetch("/api/utm-presets").then((r) => r.json());
+                    if (j?.data) setUtmPresets(j.data);
+                    toast({ kind: "success", title: "UTM preset saved" });
+                  }
+                }}
+              >
+                Save
+              </Button>
+            </div>
+            {utmPresets.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {utmPresets.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setUtmSource(p.utmSource ?? "");
+                      setUtmMedium(p.utmMedium ?? "");
+                      setUtmCampaign(p.utmCampaign ?? "");
+                    }}
+                    className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </Card>
       </div>

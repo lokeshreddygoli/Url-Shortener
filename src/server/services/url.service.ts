@@ -16,6 +16,7 @@ import {
   validateCustomAlias,
 } from "@/lib/validators/url";
 import { urlRepository } from "@/server/repositories/url.repository";
+import { scanDestinationSafety } from "@/server/services/safety-scanner.service";
 import { prisma } from "@/lib/db";
 
 const MAX_CODE_GENERATION_ATTEMPTS = 5;
@@ -125,6 +126,7 @@ export const urlService = {
       ? await bcrypt.hash(parsed.password, 10)
       : null;
 
+    const safety = await scanDestinationSafety(parsed.originalUrl);
     const isCustom = Boolean(parsed.alias);
 
     if (isCustom && parsed.alias) {
@@ -145,6 +147,8 @@ export const urlService = {
           clickLimit: parsed.clickLimit ?? null,
           expiresAt,
           isActive: parsed.isActive,
+          safetyStatus: safety.status,
+          safetyReason: safety.reason,
           title: parsed.title ?? null,
         });
 
@@ -194,6 +198,8 @@ export const urlService = {
           clickLimit: parsed.clickLimit ?? null,
           expiresAt,
           isActive: parsed.isActive,
+          safetyStatus: safety.status,
+          safetyReason: safety.reason,
           title: parsed.title ?? null,
         });
 
