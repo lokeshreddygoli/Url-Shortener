@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: RouteParams) {
   const requestId = getRequestId(req);
   try {
     const { id } = await params;
-    const caller = await requireAuthenticatedContext(req);
+    const caller = await requireAuthenticatedContext(req, "analytics:read");
     const url = new URL(req.url);
     const range: AnalyticsRange = rangeSchema.parse(
       url.searchParams.get("range") ?? "7d"

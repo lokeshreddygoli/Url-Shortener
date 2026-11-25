@@ -6,7 +6,7 @@ import {
   parseJsonBody,
 } from "@/lib/api-response";
 import { assertSameOriginIfBrowser } from "@/lib/csrf";
-import { getRequestAuthContext } from "@/server/auth/request-context";
+import { assertApiKeyScope, getRequestAuthContext } from "@/server/auth/request-context";
 import { urlService } from "@/server/services/url.service";
 
 interface RouteParams {
@@ -18,6 +18,7 @@ export async function GET(req: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
     const caller = await getRequestAuthContext(req);
+    assertApiKeyScope(caller, "links:read");
     const link = await urlService.getUrl(id, caller);
     return ok(link, 200, { requestId });
   } catch (err) {
@@ -31,6 +32,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     assertSameOriginIfBrowser(req);
     const { id } = await params;
     const caller = await getRequestAuthContext(req);
+    assertApiKeyScope(caller, "links:write");
     const body = await parseJsonBody(req);
     const updated = await urlService.updateUrl(id, body, caller);
     return ok(updated, 200, { requestId });
@@ -45,6 +47,7 @@ export async function DELETE(req: Request, { params }: RouteParams) {
     assertSameOriginIfBrowser(req);
     const { id } = await params;
     const caller = await getRequestAuthContext(req);
+    assertApiKeyScope(caller, "links:write");
     await urlService.deleteUrl(id, caller);
     return noContent({ "X-Request-Id": requestId });
   } catch (err) {

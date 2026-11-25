@@ -15,16 +15,22 @@ interface OpenApiSpec {
 
 export default function DocsPage() {
   const [spec, setSpec] = React.useState<OpenApiSpec | null>(null);
+  const [origin, setOrigin] = React.useState("");
 
   React.useEffect(() => {
     fetch("/api/openapi.json")
       .then((r) => r.json())
-      .then((data) => setSpec(data))
-      .catch(() => {});
+      .then((data) => {
+        setOrigin(window.location.origin);
+        setSpec(data);
+      })
+      .catch(() => {
+        setOrigin(window.location.origin);
+      });
   }, []);
 
-  const bookmarkletHref =
-    "javascript:(function(){var u=encodeURIComponent(location.href);window.open('http://localhost:3000/?url='+u,'_blank');})();";
+  const targetOrigin = origin || "https://your-shortly-domain";
+  const bookmarkletHref = `javascript:(function(){var u=encodeURIComponent(location.href);window.open('${targetOrigin}/?url='+u,'_blank');})();`;
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-12 sm:px-6 space-y-8">

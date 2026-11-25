@@ -305,6 +305,9 @@ export const urlService = {
 
     if (parsed.originalUrl !== undefined) {
       updateData.originalUrl = parsed.originalUrl;
+      const safety = await scanDestinationSafety(parsed.originalUrl);
+      updateData.safetyStatus = safety.status;
+      updateData.safetyReason = safety.reason;
     }
 
     if (parsed.alias !== undefined) {

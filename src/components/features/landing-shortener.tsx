@@ -27,6 +27,16 @@ export function LandingShortener() {
   const [copied, setCopied] = React.useState(false);
   const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const paramUrl = new URLSearchParams(window.location.search).get("url");
+      if (paramUrl) {
+        setUrl(paramUrl);
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);

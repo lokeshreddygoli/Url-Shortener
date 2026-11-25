@@ -5,7 +5,7 @@ import { analyticsQueryService } from "@/server/services/analytics-query.service
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const caller = await requireAuthenticatedContext(req);
+    const caller = await requireAuthenticatedContext(req, "analytics:read");
     const overview = await analyticsQueryService.getOverview(caller.userId!);
     return ok(overview, 200, { requestId });
   } catch (err) {

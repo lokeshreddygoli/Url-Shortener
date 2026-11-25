@@ -14,6 +14,8 @@ import {
 } from "@/lib/validators/url";
 import { urlRepository } from "@/server/repositories/url.repository";
 import { recordClickNonBlocking } from "@/server/services/analytics-ingest.service";
+import { webhookService } from "@/server/services/webhook.service";
+import { getRedisClient } from "@/lib/redis";
 
 export type RedirectDecision =
   | { kind: "not_found" }
@@ -26,6 +28,17 @@ export type RedirectDecision =
       status: 301 | 302 | 307;
       cacheControl: string;
     };
+
+function getGateSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTH_SECRET must be set in production");
+    }
+    return "fallback-gate-secret-32chars-minimum";
+  }
+  return secret;
+}
 
 function verifyGateCookie(
   cookieHeader: string | null,
@@ -45,7 +58,7 @@ function verifyGateCookie(
   const exp = Number(expStr);
   if (!Number.isFinite(exp) || Date.now() > exp) return false;
 
-  const secret = process.env.AUTH_SECRET || "fallback-gate-secret-32chars-minimum";
+  const secret = getGateSecret();
   const expected = crypto
     .createHmac("sha256", secret)
     .update(`${cookieName}:${linkId}:${exp}`)
@@ -58,7 +71,7 @@ function verifyGateCookie(
 
 export function createGateCookieValue(cookieName: string, linkId: string, ttlMs = 300_000): string {
   const exp = Date.now() + ttlMs;
-  const secret = process.env.AUTH_SECRET || "fallback-gate-secret-32chars-minimum";
+  const secret = getGateSecret();
   const sig = crypto
     .createHmac("sha256", secret)
     .update(`${cookieName}:${linkId}:${exp}`)
@@ -166,6 +179,38 @@ function toCachedLink(record: NonNullable<Awaited<ReturnType<typeof urlRepositor
   };
 }
 
+const expiredNotified = new Set<string>();
+
+async function notifyLinkExpiredOnce(link: CachedLink): Promise<void> {
+  if (!link.userId) return;
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      if (redis.status === "wait") await redis.connect();
+      const setOk = await redis.set(
+        `shortly:expired_hook:${link.id}`,
+        "1",
+        "EX",
+        3600,
+        "NX"
+      );
+      if (!setOk) return;
+    } catch {
+      if (expiredNotified.has(link.id)) return;
+      expiredNotified.add(link.id);
+    }
+  } else {
+    if (expiredNotified.has(link.id)) return;
+    expiredNotified.add(link.id);
+  }
+
+  void webhookService.dispatchEvent(link.userId, "link.expired", {
+    shortUrlId: link.id,
+    code: link.code,
+    expiresAt: link.expiresAt,
+  });
+}
+
 export async function resolveRedirect(
   rawCode: string,
   req: Request
@@ -198,6 +243,7 @@ export async function resolveRedirect(
     return { kind: "gone", reason: "disabled" };
   }
   if (link.expiresAt && new Date(link.expiresAt).getTime() <= Date.now()) {
+    void notifyLinkExpiredOnce(link);
     return { kind: "gone", reason: "expired" };
   }
   if (link.clickLimit !== null && link.clickCount >= link.clickLimit) {

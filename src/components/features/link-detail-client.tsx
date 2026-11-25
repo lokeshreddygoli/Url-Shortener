@@ -75,6 +75,7 @@ interface LinkAnalytics {
     count: number;
   }>;
   heatmap: Array<{ dayOfWeek: number; hour: number; count: number }>;
+  variants: Array<{ variantId: string; count: number }>;
   recentClicks: Array<{
     id: string;
     clickedAt: string;
@@ -106,10 +107,12 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
   >([]);
 
   // Smart routing rule form state
-  const [ruleType, setRuleType] = React.useState<"DEVICE" | "COUNTRY" | "AB_SPLIT">("DEVICE");
+  const [ruleType, setRuleType] = React.useState<"DEVICE" | "COUNTRY" | "TIME_WINDOW" | "AB_SPLIT">("DEVICE");
   const [ruleTargetUrl, setRuleTargetUrl] = React.useState("");
   const [ruleDevice, setRuleDevice] = React.useState("mobile");
   const [ruleCountry, setRuleCountry] = React.useState("US");
+  const [ruleStartTime, setRuleStartTime] = React.useState("09:00");
+  const [ruleEndTime, setRuleEndTime] = React.useState("17:00");
   const [ruleWeight, setRuleWeight] = React.useState("50");
 
   // UTM builder state
@@ -571,6 +574,10 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
               };
               if (ruleType === "DEVICE") payload.device = ruleDevice;
               if (ruleType === "COUNTRY") payload.country = ruleCountry;
+              if (ruleType === "TIME_WINDOW") {
+                payload.startTime = ruleStartTime;
+                payload.endTime = ruleEndTime;
+              }
               if (ruleType === "AB_SPLIT") payload.weight = Number(ruleWeight);
               const res = await fetch(`/api/urls/${link.id}/rules`, {
                 method: "POST",
@@ -589,11 +596,14 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
           >
             <select
               value={ruleType}
-              onChange={(e) => setRuleType(e.target.value as "DEVICE" | "COUNTRY" | "AB_SPLIT")}
+              onChange={(e) =>
+                setRuleType(e.target.value as "DEVICE" | "COUNTRY" | "TIME_WINDOW" | "AB_SPLIT")
+              }
               className="h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
             >
               <option value="DEVICE">Device Routing</option>
               <option value="COUNTRY">Country Routing</option>
+              <option value="TIME_WINDOW">Time Window (UTC)</option>
               <option value="AB_SPLIT">A/B Split Variant</option>
             </select>
             {ruleType === "DEVICE" && (
@@ -614,6 +624,20 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
                 placeholder="US"
                 maxLength={2}
               />
+            )}
+            {ruleType === "TIME_WINDOW" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  value={ruleStartTime}
+                  onChange={(e) => setRuleStartTime(e.target.value)}
+                  placeholder="09:00"
+                />
+                <Input
+                  value={ruleEndTime}
+                  onChange={(e) => setRuleEndTime(e.target.value)}
+                  placeholder="17:00"
+                />
+              </div>
             )}
             {ruleType === "AB_SPLIT" && (
               <Input
@@ -662,6 +686,19 @@ export function LinkDetailClient({ linkId }: { linkId: string }) {
               </div>
             ))}
           </div>
+          {(analytics?.variants.length ?? 0) > 0 && (
+            <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+              <p className="text-xs font-medium text-zinc-500">Routing / A-B Variant Stats</p>
+              <ul className="mt-2 space-y-1 text-xs">
+                {analytics?.variants.map((v) => (
+                  <li key={v.variantId} className="flex justify-between">
+                    <span className="font-mono">{v.variantId}</span>
+                    <span className="font-semibold">{formatNumber(v.count)} hits</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
 
         <Card className="p-5">

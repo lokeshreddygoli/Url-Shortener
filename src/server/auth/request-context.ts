@@ -55,6 +55,16 @@ export async function getRequestAuthContext(req?: Request): Promise<AuthContext>
   };
 }
 
+export function assertApiKeyScope(ctx: AuthContext, requiredScope: string): void {
+  if (ctx.via === "api-key" && !ctx.scopes?.includes(requiredScope)) {
+    throw new AppError(
+      403,
+      "FORBIDDEN",
+      `API key lacks required scope '${requiredScope}'`
+    );
+  }
+}
+
 export async function requireAuthenticatedContext(
   req?: Request,
   requiredScope?: string
@@ -63,16 +73,8 @@ export async function requireAuthenticatedContext(
   if (!ctx.userId) {
     throw new AppError(401, "UNAUTHENTICATED", "Authentication required");
   }
-  if (
-    requiredScope &&
-    ctx.via === "api-key" &&
-    !ctx.scopes?.includes(requiredScope)
-  ) {
-    throw new AppError(
-      403,
-      "FORBIDDEN",
-      `API key lacks required scope '${requiredScope}'`
-    );
+  if (requiredScope) {
+    assertApiKeyScope(ctx, requiredScope);
   }
   return ctx;
 }

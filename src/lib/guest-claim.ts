@@ -6,11 +6,14 @@ export interface GuestClaimPayload {
 }
 
 function getSecret(): string {
-  return (
-    process.env.GUEST_CLAIM_SECRET ||
-    process.env.AUTH_SECRET ||
-    "fallback-dev-guest-claim-secret-32chars"
-  );
+  const secret = process.env.GUEST_CLAIM_SECRET || process.env.AUTH_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("GUEST_CLAIM_SECRET or AUTH_SECRET must be set in production");
+    }
+    return "fallback-dev-guest-claim-secret-32chars";
+  }
+  return secret;
 }
 
 export function createGuestClaimToken(

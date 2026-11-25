@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { fail, getRequestId, handleApiError, ok, parseJsonBody } from "@/lib/api-response";
+import { assertSameOriginIfBrowser } from "@/lib/csrf";
 import { AppError } from "@/lib/errors";
 import { checkRateLimit, RATE_LIMITS, rateLimitHeaders } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/request-meta";
@@ -15,6 +16,7 @@ const unlockSchema = z.object({
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
+    assertSameOriginIfBrowser(req);
     const body = unlockSchema.parse(await parseJsonBody(req));
     const ip = extractClientIp(req.headers);
     const rl = await checkRateLimit(

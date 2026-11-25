@@ -37,13 +37,14 @@ export function computeDailyVisitorHash(
   userAgent: string,
   date: Date = new Date()
 ): string {
-  const secret =
-    process.env.ANALYTICS_HASH_SECRET ||
-    process.env.AUTH_SECRET ||
-    "fallback-analytics-hash-secret-32chars";
+  const secret = process.env.ANALYTICS_HASH_SECRET || process.env.AUTH_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("ANALYTICS_HASH_SECRET or AUTH_SECRET must be set in production");
+  }
+  const effectiveSecret = secret || "fallback-analytics-hash-secret-32chars";
   const day = date.toISOString().slice(0, 10); // YYYY-MM-DD UTC
   return crypto
-    .createHmac("sha256", `${secret}:${day}`)
+    .createHmac("sha256", `${effectiveSecret}:${day}`)
     .update(`${ip}|${userAgent}`)
     .digest("hex")
     .slice(0, 32);
