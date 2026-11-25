@@ -6,3 +6,297 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SafetyStatus {
+  SAFE
+  FLAGGED
+  PENDING
+}
+
+enum RuleType {
+  DEVICE
+  COUNTRY
+  TIME_WINDOW
+  AB_SPLIT
+}
+
+enum AbuseStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+  ACTIONED
+}
+
+model User {
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  name                String?
+  passwordHash        String?
+  image               String?
+  role                UserRole             @default(USER)
+  isDisabled          Boolean              @default(false)
+  emailVerified       DateTime?
+  failedLoginAttempts Int                  @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  accounts            Account[]
+  sessions            Session[]
+  shortUrls           ShortUrl[]
+  apiKeys             ApiKey[]
+  webhooks            Webhook[]
+  utmPresets          UtmPreset[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model ShortUrl {
+  id                  String       @id @default(cuid())
+  userId              String?
+  originalUrl         String       @db.Text
+  code                String
+  normalizedCode      String       @unique
+  isCustom            Boolean      @default(false)
+  redirectType        Int          @default(302)
+  passwordHash        String?
+  clickLimit          Int?
+  clickCount          Int          @default(0)
+  expiresAt           DateTime?
+  isActive            Boolean      @default(true)
+  safetyStatus        SafetyStatus @default(SAFE)
+  safetyReason        String?
+  title               String?
+  description         String?      @db.Text
+  faviconUrl          String?
+  ogImageUrl          String?
+  previewFetchedAt    DateTime?
+  guestClaimTokenHash String?
+  hasQr               Boolean      @default(false)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  deletedAt           DateTime?
+
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clickEvents  ClickEvent[]
+  rules        LinkRule[]
+  dailyStats   DailyLinkStats[]
+  abuseReports AbuseReport[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, isActive, expiresAt])
+  @@index([expiresAt])
+  @@index([deletedAt])
+}
+
+model LinkRule {
+  id         String   @id @default(cuid())
+  shortUrlId String
+  type       RuleType
+  priority   Int      @default(0)
+  targetUrl  String   @db.Text
+  device     String?
+  country    String?
+  startTime  String?
+  endTime    String?
+  weight     Int?
+  label      String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  shortUrl ShortUrl @relation(fields: [shortUrlId], references: [id], onDelete: Cascade)
+
+  @@index([shortUrlId, isActive, priority])
+}
+
+model ClickEvent {
+  id           String   @id @default(cuid())
+  shortUrlId   String
+  clickedAt    DateTime @default(now())
+  referrerHost String?
+  referrerUrl  String?  @db.Text
+  country      String   @default("unknown")
+  region       String   @default("unknown")
+  city         String   @default("unknown")
+  deviceType   String   @default("unknown")
+  browser      String   @default("unknown")
+  os           String   @default("unknown")
+  isBot        Boolean  @default(false)
+  visitorHash  String
+  source       String?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  variantId    String?
+
+  shortUrl ShortUrl @relation(fields: [shortUrlId], references: [id], onDelete: Cascade)
+
+  @@index([shortUrlId, clickedAt(sort: Desc)])
+  @@index([shortUrlId, isBot, clickedAt])
+  @@index([shortUrlId, visitorHash])
+  @@index([clickedAt])
+}
+
+model DailyLinkStats {
+  id          String   @id @default(cuid())
+  shortUrlId  String
+  day         DateTime @db.Date
+  totalClicks Int      @default(0)
+  humanClicks Int      @default(0)
+  botClicks   Int      @default(0)
+  qrClicks    Int      @default(0)
+
+  shortUrl ShortUrl @relation(fields: [shortUrlId], references: [id], onDelete: Cascade)
+
+  @@unique([shortUrlId, day])
+  @@index([day])
+}
+
+model UtmPreset {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model ApiKey {
+  id              String    @id @default(cuid())
+  userId          String
+  name            String
+  keyPrefix       String
+  keyHash         String    @unique
+  scopes          String[]
+  rateLimitPerMin Int       @default(120)
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Webhook {
+  id         String   @id @default(cuid())
+  userId     String
+  url        String   @db.Text
+  secret     String
+  events     String[]
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([userId])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  webhookId   String
+  event       String
+  payload     Json
+  statusCode  Int?
+  attempt     Int      @default(1)
+  success     Boolean  @default(false)
+  error       String?  @db.Text
+  deliveredAt DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, deliveredAt(sort: Desc)])
+}
+
+model AbuseReport {
+  id            String      @id @default(cuid())
+  shortUrlId    String?
+  reportedCode  String
+  reporterEmail String?
+  reason        String
+  details       String?     @db.Text
+  status        AbuseStatus @default(OPEN)
+  createdAt     DateTime    @default(now())
+  resolvedAt    DateTime?
+
+  shortUrl ShortUrl? @relation(fields: [shortUrlId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([shortUrlId])
+}
+
+model BlockedDomain {
+  id        String   @id @default(cuid())
+  domain    String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+}
