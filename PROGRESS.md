@@ -35,7 +35,8 @@
 | AUD-02..07 | API key scopes & `rateLimitPerMin`, login/reset rate limits, update safety rescan, `link.expired` webhook, CSRF/prod secret hardening, A/B UI & >80% service branch coverage | Done | `bbca12b` |
 | AUD-08 (E2E) | WebKit HTTP `Secure` cookie fix, `/docs` React 19 bookmarklet fix, added `firefox` & `webkit` Playwright projects (8/8 passed) | Done | `2690c22` |
 | AUD-08 (Perf) | Font `display: "optional"`, `prefetch={false}` on secondary links, lazy `CommandPalette`, `optimizePackageImports` -> **100/100/100/100** Desktop & Mobile Lighthouse across `/`, `/login`, `/dashboard` | Done | `576c728` |
-| Docs & Reports | Screenshots, relative-link `README.md`, `PERFORMANCE_REPORT.md`, `DEPLOYMENT_GUIDE.md`, `FINAL_TEST_REPORT.md`, `SECURITY_AUDIT.md`, updated `FINAL_AUDIT.md` | Done | `7075ec6`+ |
+| Docs & Reports | Screenshots, relative-link `README.md`, `PERFORMANCE_REPORT.md`, `DEPLOYMENT_GUIDE.md`, `FINAL_TEST_REPORT.md`, `SECURITY_AUDIT.md`, updated `FINAL_AUDIT.md` | Done | `7075ec6` / `c4f9fc8` |
+| RC `v1.0.0` | Version bump (`1.0.0`), Prisma 6.19.3 migration/compatibility check, standalone `server.js` runtime test, PG/Redis/restart/queue-recovery chaos test, Playwright WebKit test race fixes (8/8 pass), `RELEASE_CHECKLIST.md`, `RELEASE_REPORT.md` | Verified locally (cloud deploy & Docker daemon pending external host/env) | HEAD |
 
 ## Final Verified Evidence
 - `npm run lint` → 0 errors, 0 warnings

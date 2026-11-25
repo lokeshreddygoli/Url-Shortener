@@ -55,14 +55,16 @@ test.describe("Shortly Core E2E Flows", () => {
     expect(homeHeadersRes.headers()["x-frame-options"]).toBe("DENY");
     expect(homeHeadersRes.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
 
-    await page.goto("/docs");
+    await page.goto("/docs", { waitUntil: "networkidle" });
     await expect(
       page.getByRole("heading", { level: 1, name: /Shortly/i })
     ).toBeVisible();
     await expect(page.getByText("/api/urls").first()).toBeVisible();
 
     // Bookmarklet ?url= prefill on landing
-    await page.goto("/?url=https%3A%2F%2Fexample.com%2Fbookmarklet-test");
+    await page.goto("/?url=https%3A%2F%2Fexample.com%2Fbookmarklet-test", {
+      waitUntil: "networkidle",
+    });
     await expect(page.getByLabel("Destination URL")).toHaveValue(
       "https://example.com/bookmarklet-test"
     );
@@ -93,6 +95,7 @@ test.describe("Shortly Core E2E Flows", () => {
 
     await page.waitForURL("**/dashboard");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await expect(page).toHaveTitle(/Dashboard/);
 
     // Axe scan on dashboard
     const axeDash = await new AxeBuilder({ page })
