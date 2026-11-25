@@ -48,6 +48,17 @@ test.describe("Shortly Core E2E Flows", () => {
       path: `${ARTIFACT_DIR}/landing-${testInfo.project.name}.png`,
       fullPage: false,
     });
+
+    // Verify security headers and OpenAPI docs page
+    const homeHeadersRes = await page.request.get(`${baseURL}/`);
+    expect(homeHeadersRes.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(homeHeadersRes.headers()["x-frame-options"]).toBe("DENY");
+    expect(homeHeadersRes.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+
+    await page.goto("/docs");
+    await expect(page.getByText(/Shortly REST API/i)).toBeVisible();
+    await expect(page.getByText("/api/urls").first()).toBeVisible();
+
     expect(consoleErrors).toEqual([]);
   });
 
@@ -104,8 +115,8 @@ test.describe("Shortly Core E2E Flows", () => {
     expect(redirectRes.headers()["location"]).toBe("https://example.org/e2e-dest");
     await freshContext.close();
 
-    // Wait briefly for non-blocking click flush, then check link detail analytics
-    await page.waitForTimeout(400);
+    // Wait for Redis batch click flusher (1s interval) before checking link detail analytics
+    await page.waitForTimeout(1400);
     await page
       .getByRole("link", { name: `/${alias1}` })
       .and(page.locator(":visible"))
@@ -113,7 +124,10 @@ test.describe("Shortly Core E2E Flows", () => {
       .click();
     await page.waitForURL("**/dashboard/links/**");
     await expect(page.getByText("Total Clicks")).toBeVisible();
-    await expect(page.getByText("Total Clicks").locator("..")).toContainText("1");
+    await expect(async () => {
+      await page.reload();
+      await expect(page.getByText("Total Clicks").locator("..")).toContainText("1");
+    }).toPass({ timeout: 5000 });
     await expect(page.getByText("QR Code Studio")).toBeVisible();
 
     // Verify QR PNG & SVG endpoints return valid images
