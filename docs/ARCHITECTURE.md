@@ -65,17 +65,17 @@ flowchart LR
 
 ## 5. Performance Benchmarks & Index Verification (Measured)
 
-### k6 Load Test Results (25 VUs: 20 redirect VUs + 5 create VUs, 15s)
+### k6 Load Test Results (25 VUs: 20 redirect VUs + 5 create VUs, 15s, `REDIRECT_RATE_LIMIT=100000`)
 
-| Mode | Redirect Avg | Redirect p50 | Redirect p95 | Throughput (mixed) | Error Rate |
-|---|---|---|---|---|---|
-| PostgreSQL Direct (Redis Off) | 67.89 ms | 64.68 ms | 90.05 ms | 60.1 req/s | 0.00% |
-| Redis Cache-Aside + Click Queue | 27.93 ms | 26.27 ms | **43.21 ms** | 105.2 req/s | 0.00% |
+| Mode | Redirect Avg | Redirect p50 | Redirect p95 | Redirect p99 | Mixed Throughput | Error Rate |
+|---|---|---|---|---|---|---|
+| PostgreSQL Direct (`REDIS_URL=""`) | 82.16 ms | 80.13 ms | 106.52 ms | 126.28 ms | 38.73 req/s | 0.00% |
+| Redis Cache-Aside + Click Queue | **30.95 ms** | **27.95 ms** | **52.50 ms** | **78.68 ms** | **87.58 req/s** | **0.00%** |
 
 ### PostgreSQL `EXPLAIN ANALYZE` Index Verification
-- `ShortUrl` code lookup: `Index Scan using "ShortUrl_normalizedCode_key"` (`0.062 ms` execution).
-- `ClickEvent` time-series: `Index Scan` on `shortUrlId` (`0.195 ms` execution).
-- `DailyLinkStats` rollup read: `Index Scan Backward using "DailyLinkStats_shortUrlId_day_key"` (`0.034 ms` execution).
+- `ShortUrl` code lookup: `Index Scan using "ShortUrl_normalizedCode_key"` (`0.456 ms` execution).
+- `ClickEvent` time-series: `Index Scan using "ClickEvent_shortUrlId_visitorHash_idx"` (`0.102 ms` execution).
+- `DailyLinkStats` rollup read: `Index Scan Backward using "DailyLinkStats_shortUrlId_day_key"` (`0.058 ms` execution).
 
 ### Rollup Table Trade-offs
 `DailyLinkStats` stores pre-aggregated daily counters (`totalClicks`, `humanClicks`, `botClicks`, `qrClicks`) updated in batch alongside `ClickEvent` inserts. This keeps multi-month overview queries O(days) instead of scanning millions of raw `ClickEvent` rows, at the trade-off of slightly heavier batch writes and daily granularity (intra-day `24h` charts still query indexed `ClickEvent` rows directly).

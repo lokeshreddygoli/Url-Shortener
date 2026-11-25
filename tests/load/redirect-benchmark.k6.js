@@ -39,6 +39,7 @@ export function createFlow() {
   });
   const res = http.post(`${BASE_URL}/api/urls`, payload, {
     headers: { "Content-Type": "application/json" },
+    responseCallback: http.expectedStatuses(201, 429),
   });
   check(res, {
     "status is 201 or 429": (r) => r.status === 201 || r.status === 429,

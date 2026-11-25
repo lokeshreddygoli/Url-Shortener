@@ -1,32 +1,75 @@
 # Shortly — Production-Grade URL Shortener & Analytics Platform
 
-**Shortly** is a full-stack URL shortening, smart routing, QR studio, and privacy-first analytics platform built with Next.js (App Router), TypeScript, PostgreSQL (Prisma), and Redis.
+**Shortly** is a full-stack URL shortening, smart routing, branded QR studio, and privacy-first analytics platform built with Next.js (App Router), TypeScript (`strict: true`), PostgreSQL (Prisma), and Redis.
+
+**Author:** Lokesh Reddy ([lokeshreddygoli2005@gmail.com](mailto:lokeshreddygoli2005@gmail.com))
+
+---
+
+## Live Demo
+
+No public hosted demo URL is provisioned in this repository workspace. You can run the complete production stack locally with realistic seeded data (`demo@shortly.dev` / `DemoPass123!`, including sample links, A/B variants, click history, and UTM presets):
+
+- **Option A — Docker Compose (PostgreSQL 17 + Redis 7 + Next.js standalone):**
+  ```bash
+  cp .env.example .env
+  docker compose up --build -d
+  docker compose exec app npm run db:seed:demo
+  ```
+  Then open `http://localhost:3000`.
+
+- **Option B — Local Node.js without Docker Daemon (embedded PostgreSQL 17.12):**
+  ```bash
+  cp .env.example .env
+  npm install
+  npm run db:local        # boots local PostgreSQL 17.12 on localhost:5432 (shortly + shortly_test)
+  npx prisma migrate deploy
+  npm run db:seed:demo    # seeds demo@shortly.dev / DemoPass123!
+  npm run build && npm run start
+  ```
+
+See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for production hosting on VPS (Docker Compose + TLS proxy) or managed PaaS (Vercel + Neon + Upstash).
+
+---
+
+## Screenshots
+
+Captured from live Playwright verification across desktop (`1280×720`) and mobile (`Pixel 7`) viewports:
+
+| Desktop Landing (`1280×720`) | Desktop Dashboard (`1280×720`) |
+|---|---|
+| ![Desktop Landing](docs/screenshots/landing-chromium.png) | ![Desktop Dashboard](docs/screenshots/dashboard-chromium.png) |
+
+| Mobile Landing (`Pixel 7`) | Mobile Dashboard (`Pixel 7`) |
+|---|---|
+| ![Mobile Landing](docs/screenshots/landing-mobile-chrome.png) | ![Mobile Dashboard](docs/screenshots/dashboard-mobile-chrome.png) |
 
 ---
 
 ## Key Features
 
-- **Fast, Correct Redirect Engine (`GET /:code`)**:
+- **Fast, Reliable Redirect Engine (`GET /:code`)**:
   - `302 Found` default with `Cache-Control: no-store` for accurate analytics (plus `307` and opt-in `301`).
-  - Redis cache-aside with explicit invalidation on edits/deletes and 15s negative caching for 404s.
-  - Non-blocking click ingestion via Redis list queue + batch DB inserts (gracefully falls back to direct async DB inserts when Redis is offline).
-  - Separate bot/link-preview crawler detection and proper `404` / `410` / `429` pages.
+  - Redis cache-aside with explicit invalidation on edits/deletes and 15s negative caching for `404`s.
+  - Atomic Redis click queue (`Lua` `LPOP`→`RPUSH` into processing list + idempotent `ClickEvent.id` `ON CONFLICT DO NOTHING` batch persistence), falling back automatically to direct asynchronous DB writes when Redis is unavailable.
+  - Separate bot/link-preview crawler detection and dedicated `404` / `410` / `429` pages.
 - **Hardened Shortening & Security**:
   - Cryptographic 7-character Base62 codes (`crypto.randomInt`) and case-insensitive custom aliases (`3-32` chars) with reserved-word protection.
-  - Adversarial SSRF guard (blocks `javascript:`, `data:`, `file:`, credentials-in-URL, loopback/private/link-local IPv4 & IPv6, decimal/hex IP tricks, and own-domain redirect loops), re-checked at redirect time.
-  - Sliding-window rate limiting (`429` + `Retry-After` + `X-RateLimit-*`), CSP & security headers, CSRF origin checks, bcrypt password hashing, and 5-attempt login lockout.
+  - SSRF & safety guardrails (blocks `javascript:`, `data:`, `file:`, credentials-in-URL, loopback/private/link-local IPv4 & IPv6, hex/octal/decimal IP encodings, and own-domain redirect loops), re-checked at redirect time and during preview fetches.
+  - Shared Redis sliding-window rate limiting (with in-memory fallback when Redis is offline), CSP & security headers, CSRF origin checks, `bcryptjs` hashing, and 5-attempt login lockout.
+  - Fail-closed secret validation in production (`AUTH_SECRET`, `ANALYTICS_HASH_SECRET`, `GUEST_CLAIM_SECRET` ≥ 32 chars).
 - **Privacy-First Analytics**:
-  - Raw IPs are never stored; unique visitor metrics use a daily-rotating HMAC-SHA256 hash.
-  - Time-series charts, referrers, device/browser/OS, geo headers, UTM breakdown, 7×24 peak hours heatmap, and live Server-Sent Events (SSE) stream.
+  - Raw IPs are never persisted; unique visitor metrics use a daily-rotating HMAC-SHA256 hash (`ANALYTICS_HASH_SECRET`).
+  - Time-series charts, referrers, device/browser/OS, geo headers, UTM breakdown, 7×24 peak hours heatmap, CSV export, and live Server-Sent Events (SSE) stream.
 - **Advanced Capabilities**:
-  - Password-protected links, click limits, and scheduled expiration.
-  - Smart routing (device, country, time-window) and weighted A/B split testing.
+  - Password-protected links, click limits, and scheduled expiration (`link.expired` webhook event).
+  - Smart routing (`DEVICE`, `COUNTRY`, `TIME_WINDOW`) and weighted `AB_SPLIT` testing with per-variant analytics.
   - Branded QR Code Studio (PNG & SVG export with `?qr=1` scan attribution).
-  - Scoped Bearer API keys, OpenAPI 3.0.3 spec (`/api/openapi.json`) & interactive `/docs`, HMAC-SHA256 signed webhooks with retries, CSV bulk import/export, `⌘K` command palette, bookmarklet, and role-gated `/admin` console.
+  - Scoped Bearer API keys (`links:read`, `links:write`, `analytics:read`, enforced per route + per-key rate limits), OpenAPI 3.0.3 spec (`/api/openapi.json`) & interactive `/docs`, HMAC-SHA256 signed webhooks with retries, CSV bulk import/export, `⌘K` command palette, dynamic-origin bookmarklet, and role-gated `/admin` console.
 
 ---
 
-## Architecture
+## Architecture & Documentation
 
 ```mermaid
 flowchart LR
@@ -34,63 +77,56 @@ flowchart LR
     Next --> Auth["Auth.js (Credentials + Optional OAuth)"]
     Next --> RL["Sliding-Window Rate Limiter"]
     Next --> Cache["Redis (Redirect Cache + Neg Cache)"]
-    Next --> Queue["Redis Click Queue (Batch Flush)"]
+    Next --> Queue["Redis Atomic Click Queue"]
     Next --> PG["PostgreSQL (Prisma ORM)"]
-    Queue -->|"Batch Insert (1s / 50 events)"| PG
+    Queue -->|"Lua Move + Batch Insert"| PG
     Next -->|"Fallback when Redis down"| PG
     Next --> Safe["Safety Scanner (Safe Browsing / Heuristic)"]
     Next --> WH["Webhook Dispatcher (HMAC Signed)"]
 ```
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](docs/SECURITY.md), and [ADRs](docs/adrs/) for deep dives.
+- [System Architecture](docs/ARCHITECTURE.md)
+- [Threat Model & Security Practices](docs/SECURITY.md)
+- [Architecture Decision Records (ADRs)](docs/adrs/)
+- [Independent Audit Findings & Fixes](FINAL_AUDIT.md)
+- [Verification & Test Report](FINAL_TEST_REPORT.md)
+- [Security Audit Report](SECURITY_AUDIT.md)
+- [Performance & Reliability Report](PERFORMANCE_REPORT.md)
+- [Production Deployment Guide](DEPLOYMENT_GUIDE.md)
+- [Build Progress Log](PROGRESS.md)
+- [Engineering & Interview Notes](INTERVIEW_NOTES.md)
 
 ---
 
 ## Tech Stack
 
-- **Frontend / App:** Next.js 16.4.6 (App Router, Turbopack), React 19, TypeScript (`strict: true`), Tailwind CSS v4, Lucide Icons, Recharts
-- **Database:** PostgreSQL 17 + Prisma 6.19.3
-- **Cache / Queue / Rate Limit:** Redis (`ioredis`) with automatic in-memory / direct-DB fallback
-- **Auth:** Auth.js (`next-auth@5.0.0-beta.32`) with Credentials + optional Google OAuth
-- **Validation & Logging:** Zod 4, Pino structured JSON logging
-- **Testing & Load:** Vitest, Playwright + `@axe-core/playwright`, k6
-
----
-
-## Quick Start (3 Commands)
-
-```bash
-cp .env.example .env
-npm install
-docker compose up --build
-```
-
-### Local Development without Docker Daemon
-If Docker Desktop is not running locally, you can boot a user-space PostgreSQL 17.12 instance directly via `embedded-postgres`:
-
-```bash
-npm run db:local        # starts local PostgreSQL on localhost:5432 (shortly + shortly_test)
-npx prisma migrate dev  # applies database migrations
-npm run db:seed:demo    # optional: seeds demo@shortly.dev / DemoPass123!
-npm run dev             # starts Next.js dev server on http://localhost:3000
-```
+- **Frontend / App:** Next.js `16.4.6` (App Router, Turbopack), React `19.3.1`, TypeScript (`strict: true`), Tailwind CSS v4, Lucide Icons, Recharts, Framer Motion
+- **Database:** PostgreSQL 17 + Prisma `6.19.3`
+- **Cache / Queue / Rate Limit:** Redis (`ioredis` `6.1.0`) with automatic in-memory / direct-DB fallback
+- **Auth:** Auth.js (`next-auth` `5.0.0-beta.32`) with Credentials (`bcryptjs`) + optional Google OAuth
+- **Validation & Logging:** Zod `4.6.7`, Pino `10.4.0` structured JSON logging
+- **Testing & Load:** Vitest `3.2.7`, Playwright `1.65.1` + `@axe-core/playwright`, k6 `v2.4.0`
 
 ---
 
 ## Environment Variables
 
+See [.env.example](.env.example) for the complete template.
+
 | Variable | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string for runtime and migrations |
-| `TEST_DATABASE_URL` | No | Separate PostgreSQL database for integration tests |
+| `TEST_DATABASE_URL` | No | Separate PostgreSQL database for Vitest integration tests |
 | `REDIS_URL` | No | Redis URL for cache-aside, rate limits, and click queue (degrades gracefully if unset/down) |
-| `AUTH_SECRET` | Yes | ≥ 32-char secret for Auth.js JWTs and gate cookies |
-| `ANALYTICS_HASH_SECRET` | Yes | ≥ 32-char secret for daily-rotating visitor hashes |
-| `GUEST_CLAIM_SECRET` | Yes | ≥ 32-char secret for signing guest link claim tokens |
+| `AUTH_SECRET` | Yes | ≥ 32-char secret for Auth.js JWTs and gate cookies (required in production) |
+| `ANALYTICS_HASH_SECRET` | Yes | ≥ 32-char secret for daily-rotating visitor hashes (required in production) |
+| `GUEST_CLAIM_SECRET` | Yes | ≥ 32-char secret for signing guest link claim tokens (required in production) |
 | `APP_URL` | Yes | Canonical base URL (e.g. `https://short.ly`) |
+| `NEXTAUTH_URL` | No | Auth.js canonical URL (set equal to `APP_URL` in production) |
 | `GOOGLE_CLIENT_ID` / `SECRET` | No | Enables Google OAuth sign-in when both are set |
 | `EMAIL_PROVIDER` | No | `console` (default dev logger) or `smtp` |
 | `GOOGLE_SAFE_BROWSING_API_KEY` | No | Enables Google Safe Browsing v4 checks alongside local heuristics |
+| `REDIRECT_RATE_LIMIT` | No | Overrides default per-IP redirect limit (`600`/min) |
 
 ---
 
@@ -98,44 +134,53 @@ npm run dev             # starts Next.js dev server on http://localhost:3000
 
 | Script | Description |
 |---|---|
-| `npm run dev` | Start development server |
-| `npm run build` | Production Next.js build (`standalone` output) |
-| `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run TypeScript strict typecheck |
+| `npm run dev` | Start Next.js development server |
+| `npm run build` | Build Next.js production bundle (`standalone` output) |
+| `npm run start` | Start built production server |
+| `npm run lint` | Run ESLint (`eslint .`) |
+| `npm run typecheck` | Run TypeScript strict typecheck (`tsc --noEmit`) |
 | `npm test` | Run Vitest unit + PostgreSQL integration suite |
 | `npm run test:coverage` | Run Vitest with V8 coverage report |
 | `npm run test:e2e` | Run Playwright E2E + axe accessibility suite |
 | `npm run db:local` | Start embedded PostgreSQL 17.12 locally |
-| `npm run db:seed:demo` | Seed realistic demo data (`demo@shortly.dev` / `DemoPass123!`) |
+| `npm run db:generate` | Generate Prisma Client |
+| `npm run db:migrate` | Run `prisma migrate dev` |
+| `npm run db:migrate:deploy` | Apply production Prisma migrations |
+| `npm run db:seed` / `db:seed:demo` | Seed baseline / demo database records |
 
 ---
 
-## Load Test Results (`k6`)
+## Benchmarks (Methodology and Limits)
 
-Measured locally with `k6 v2.4.0` (`tests/load/redirect-benchmark.k6.js`, 25 concurrent VUs: 20 redirect VUs + 5 link-creation VUs for 15s) against `next start`:
+### 1. Redirect & API Load Benchmarks (`k6 v2.4.0`)
 
-| Configuration | Redirect Avg | Redirect p50 | Redirect p95 | Mixed Throughput | Error Rate |
-|---|---|---|---|---|---|
-| PostgreSQL Direct (Redis Off) | 67.89 ms | 64.68 ms | 90.05 ms | 60.1 req/s | 0.00% |
-| **Redis Cache-Aside + Click Queue** | **27.93 ms** | **26.27 ms** | **43.21 ms** | **105.2 req/s** | **0.00%** |
+Measured against production `next start` (`127.0.0.1`) with [redirect-benchmark.k6.js](tests/load/redirect-benchmark.k6.js) (25 concurrent VUs: 20 `redirects` VUs hitting seeded link `launch-26` + 5 `creates` VUs calling `POST /api/urls`, 15s duration). To measure redirect engine throughput rather than single-IP loopback throttling, `REDIRECT_RATE_LIMIT=100000` was set during the benchmark; guest `creates` intentionally hit the `15/min` per-IP limit (`429`) and are marked as expected responses alongside `201`.
 
----
+| Configuration | Redirect Avg | Redirect p50 | Redirect p95 | Redirect p99 | Mixed Throughput | HTTP Error Rate |
+|---|---|---|---|---|---|---|
+| PostgreSQL Direct (`REDIS_URL=""`) | 82.16 ms | 80.13 ms | 106.52 ms | 126.28 ms | 38.73 req/s (1,743 reqs) | 0.00% |
+| **Redis Cache-Aside + Click Queue** | **30.95 ms** | **27.95 ms** | **52.50 ms** | **78.68 ms** | **87.58 req/s (3,941 reqs)** | **0.00%** |
 
-## API Overview
+### 2. PostgreSQL Query Plan Verification (`EXPLAIN ANALYZE`)
 
-Full OpenAPI 3.0.3 schema is served at `GET /api/openapi.json` and browsable at `/docs`.
+Verified via [check-explain.mjs](scripts/check-explain.mjs) with `enable_seqscan = off`:
+- `ShortUrl` code lookup: `Index Scan using "ShortUrl_normalizedCode_key"` (`0.456 ms` execution)
+- `ClickEvent` analytics aggregation: `Index Scan using "ClickEvent_shortUrlId_visitorHash_idx"` (`0.102 ms` execution)
+- `DailyLinkStats` rollup read: `Index Scan Backward using "DailyLinkStats_shortUrlId_day_key"` (`0.058 ms` execution)
 
-- `POST /api/urls` / `GET /api/urls` — Create and list/search/filter links
-- `GET/PATCH/DELETE /api/urls/:id` — Manage single link
-- `GET /api/urls/:id/analytics` & `GET /api/urls/:id/stream` — Aggregated analytics & live SSE click feed
-- `GET /api/urls/:id/qr` — Branded PNG & SVG QR generation
-- `POST /api/urls/bulk`, `POST /api/urls/import`, `GET /api/urls/export` — Bulk operations & CSV/JSON tools
-- `GET/POST/DELETE /api/keys` & `/api/webhooks` — Developer API keys & HMAC webhooks
-- `GET /api/health` & `GET /api/ready` — Liveness & dependency readiness probes
+### 3. Lighthouse Web Performance (`/` · `/login` · `/dashboard`)
 
----
+Measured against `next start` using Chrome/Lighthouse in both Desktop (`40ms RTT`, `10 Mbps`, `1x` CPU) and Mobile (`150ms RTT`, `1.6 Mbps`, `4x` CPU) emulation:
 
-## Deployment
+| Route | Desktop (Perf / A11y / BP / SEO) | Mobile (Perf / A11y / BP / SEO) | Desktop LCP / TBT | Mobile LCP / TBT |
+|---|---|---|---|---|
+| `/` | 100 / 100 / 100 / 100 | 100 / 100 / 100 / 100 | 0.6 s / 10 ms | 0.8 s / 80 ms |
+| `/login` | 100 / 100 / 100 / 100 | 100 / 100 / 100 / 100 | 0.2 s / 0 ms | 0.7 s / 30 ms |
+| `/dashboard` | 100 / 100 / 100 / 100 | 100 / 100 / 100 / 100 | 0.3 s / 0 ms | 0.9 s / 40 ms |
 
-- **Docker Compose (VPS / VM):** Set strong secrets in `.env` and run `docker compose up -d --build`. Migrations apply automatically on container boot via `npx prisma migrate deploy`.
-- **Managed PaaS (Vercel + Neon Postgres + Upstash Redis):** Connect repository, configure `DATABASE_URL`, `REDIS_URL`, `AUTH_SECRET`, `ANALYTICS_HASH_SECRET`, `GUEST_CLAIM_SECRET`, `APP_URL`, and run `npx prisma migrate deploy` in the build/release step.
+### Measurement Limits
+- Benchmarks ran on a single Windows host (`Node.js v22.14.0`, `embedded-postgres` 17.12, local Redis 3.0.504), so loopback network RTT is near zero (~0.4 ms) and CPU contention is shared across load generator, app server, Redis, and PostgreSQL.
+- Docker Compose container execution (`docker compose up --build`) could not be run on this host because the Docker daemon is not running (`//./pipe/docker_engine` unavailable).
+- Results validate relative architectural speedup (`2.65×` lower average redirect latency and `2.26×` higher mixed RPS with Redis enabled) rather than multi-region production capacity.
+
+See [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md) for raw command outputs and failure-mode measurements.
