@@ -13,10 +13,10 @@
 |---|---|---|---|---|
 | 1 | Repo inspection, architecture, ADRs, env validation | Done | `bb7782c` | Architecture, 4 ADRs, `.env.example`, `PROGRESS.md` |
 | 2 | Setup: Next.js, Tailwind, Prisma, local PG, health/ready | Done | `d23d751` | Next.js 16.4.6, Prisma 6.19.3, Zod 4.6.7, Pino, Vitest |
-| 3 | Schema + migrations + seed | Done | included in Phase 4 commit | Initial migration `20261125164841_init` applied to `shortly` and `shortly_test` |
-| 4 | Services + REST API + error envelope | Done | pending | Validators, repository, services, REST CRUD, 51 tests green |
-| 5 | Code generation + redirect engine | In Progress | - | Fast redirect path, non-blocking click ingestion, bot detection, 404/410 pages |
-| 6 | Auth + authorization | Pending | - | |
+| 3 | Schema + migrations + seed | Done | `17bccac` | Initial migration `20261125164841_init` applied to `shortly` and `shortly_test` |
+| 4 | Services + REST API + error envelope | Done | `17bccac` | Validators, repository, services, REST CRUD, 51 tests green |
+| 5 | Code generation + redirect engine | Done | pending | `GET /:code`, UA/bot parser, non-blocking click ingestion, 404/410 pages |
+| 6 | Auth + authorization | In Progress | - | Auth.js v5, email/password + optional Google OAuth, reset/profile/delete, IDOR matrix |
 | 7 | Frontend: design system, landing, auth, dashboard, link CRUD | Pending | - | |
 | 8 | Analytics collection + dashboards + QR | Pending | - | |
 | — | Core Checkpoint (`v0.1-core`) | Pending | - | |
@@ -25,11 +25,13 @@
 | 11 | Wow features (Section 4, priority order) | Pending | - | |
 | 12 | Full regression, accessibility, docs, CI, Docker prod image | Pending | - | |
 
-## Phase 4 Evidence
-- `npm run lint` -> passed (0 errors)
+## Phase 5 Evidence
+- `npm run lint` -> 0 errors/warnings
 - `npm run typecheck` -> `tsc --noEmit` passed
-- `npm test` -> 4 files, 51/51 tests passed:
-  - `tests/unit/env.test.ts` (2 tests)
-  - `tests/unit/short-code.test.ts` (3 tests)
-  - `tests/unit/url-validator.test.ts` (42 adversarial & valid URL/alias tests)
-  - `tests/integration/urls-crud.test.ts` (4 tests against real Postgres `shortly_test`, including 50 parallel concurrent alias creations yielding 1 x 201 and 49 x 409)
+- `npm test` -> 6 files, 59/59 passed (`tests/unit/ua.test.ts`, `tests/integration/redirect-engine.test.ts` added)
+- `npm run build` -> Next.js 16.4.6 production build succeeded
+- HTTP smoke test (`next start -p 3099`):
+  - `POST /api/urls` -> `201 smoke302`
+  - `GET /smoke302` -> `302 Location: https://example.com/smoke-target Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate`
+  - `GET /doesnotexist99` -> `404`
+  - `GET /smoke302` (disabled) -> `410`
