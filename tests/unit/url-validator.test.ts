@@ -71,7 +71,7 @@ describe("custom alias validator", () => {
     });
   });
 
-  it.each(["ab", "a".repeat(33), "bad alias", "bad/alias", "api", "Dashboard", "ADMIN", "_next", "health"])(
+  it.each(["ab", "a".repeat(33), "bad alias", "bad/alias", "api", "Dashboard", "ADMIN", "_next", "health", "verify-email"])(
     "rejects invalid or reserved alias '%s'",
     (alias) => {
       expect(validateCustomAlias(alias).ok).toBe(false);

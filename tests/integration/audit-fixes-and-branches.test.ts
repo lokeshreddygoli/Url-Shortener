@@ -465,14 +465,25 @@ describe("Audit fixes, rate-limiter modes, and service branch coverage", () => {
     expect(ogPrev?.title).toBe("OG Title");
     expect(ogPrev?.description).toBe("OG Desc");
 
-    // Safety scanner: malformed, known-bad, and Safe Browsing clean/error fallback
+    // Safety scanner: malformed, known-bad, and Safe Browsing match/clean/500/error fallback
     expect((await scanDestinationSafety("not a url")).status).toBe("FLAGGED");
     expect((await scanDestinationSafety("https://malware.testing.google.test/bad")).status).toBe("FLAGGED");
     process.env.GOOGLE_SAFE_BROWSING_API_KEY = "test-key";
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ matches: [{ threatType: "MALWARE" }] }), { status: 200 })
+    );
+    expect(await scanDestinationSafety("https://phish.example.org/x")).toEqual({
+      status: "FLAGGED",
+      reason: "Google Safe Browsing: MALWARE",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ matches: [] }), { status: 200 })
     );
     expect((await scanDestinationSafety("https://example.org/safe")).status).toBe("SAFE");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("upstream error", { status: 500 })
+    );
+    expect((await scanDestinationSafety("https://example.org/upstream-err")).status).toBe("SAFE");
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
     expect((await scanDestinationSafety("https://example.org/fallback")).status).toBe("SAFE");
     delete process.env.GOOGLE_SAFE_BROWSING_API_KEY;
@@ -571,6 +582,45 @@ describe("Audit fixes, rate-limiter modes, and service branch coverage", () => {
       const profile = await authService.getProfile(userId);
       expect(profile.emailVerified).toBe(true);
       expect(await authService.resendVerification(userId)).toEqual({ alreadyVerified: true });
+
+      // Direct SMTP dot-stuffing, CRLF sanitization, password reset email, and expired verification token
+      await getEmailTransport().send({
+        to: "dest@example.com\r\nBcc: attacker@evil.test",
+        subject: "Dot test\r\nX-Injected: 1",
+        text: "Line 1\n.Leading dot line",
+      });
+      const rawDotMsg = received[received.length - 1] ?? "";
+      expect(rawDotMsg).not.toContain("\r\nBcc:");
+      expect(rawDotMsg).not.toContain("\r\nX-Injected:");
+      expect(rawDotMsg).toContain("..Leading dot line");
+
+      await authService.requestPasswordReset({ email: "branch-cov@test.local" });
+      expect(received[received.length - 1]).toContain("Reset your Shortly password");
+
+      const expTokenRaw = "expired_token_0123456789abcdef";
+      const cryptoMod = await import("node:crypto");
+      await prisma.verificationToken.create({
+        data: {
+          identifier: "branch-cov@test.local",
+          token: cryptoMod.createHash("sha256").update(expTokenRaw).digest("hex"),
+          expires: new Date(Date.now() - 60_000),
+        },
+      });
+      await expect(authService.verifyEmail({ token: expTokenRaw })).rejects.toMatchObject({
+        statusCode: 400,
+      });
+
+      // SMTP failure handling: closed port rejects SmtpEmailTransport.send cleanly while register survives gracefully
+      process.env.SMTP_PORT = "1";
+      await expect(
+        getEmailTransport().send({ to: "fail@example.com", subject: "Fail", text: "Fail" })
+      ).rejects.toThrow();
+      const smtpFailSignup = await authService.register({
+        email: `smtp-fail-${Date.now()}@example.com`,
+        name: "Smtp Fail Tolerant",
+        password: "Password123!",
+      });
+      expect(smtpFailSignup.user.email).toContain("smtp-fail-");
     } finally {
       process.env.EMAIL_PROVIDER = prevProvider ?? "console";
       process.env.SMTP_HOST = prevHost ?? "";

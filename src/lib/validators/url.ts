@@ -12,6 +12,7 @@ export const RESERVED_ALIASES = new Set([
   "logout",
   "forgot-password",
   "reset-password",
+  "verify-email",
   "dashboard",
   "analytics",
   "settings",
