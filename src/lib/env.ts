@@ -22,6 +22,7 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default("Shortly <no-reply@shortly.local>"),
   SMTP_HOST: z.string().optional().default(""),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.enum(["true", "false"]).optional().default("false"),
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASS: z.string().optional().default(""),
   GOOGLE_SAFE_BROWSING_API_KEY: z.string().optional().default(""),

@@ -496,4 +496,130 @@ describe("Audit fixes, rate-limiter modes, and service branch coverage", () => {
       statusCode: 404,
     });
   });
+
+  it("delivers real SMTP email over TCP, verifies user email tokens, and covers api-key & auth branches", async () => {
+    const net = await import("node:net");
+    const { getEmailTransport } = await import("@/lib/email");
+    const { apiKeyService } = await import("@/server/services/api-key.service");
+    const { authService } = await import("@/server/services/auth.service");
+    const { persistClickBatch } = await import("@/server/services/analytics-ingest.service");
+
+    const received: string[] = [];
+    const smtpServer = net.createServer((socket) => {
+      socket.write("220 localhost ESMTP ShortlyTest\r\n");
+      let inData = false;
+      let buf = "";
+      socket.on("data", (chunk) => {
+        buf += chunk.toString("utf8");
+        if (inData) {
+          const endIdx = buf.indexOf("\r\n.\r\n");
+          if (endIdx !== -1) {
+            received.push(buf.slice(0, endIdx));
+            buf = buf.slice(endIdx + 5);
+            inData = false;
+            socket.write("250 2.0.0 OK queued\r\n");
+          }
+          return;
+        }
+        const lines = buf.split("\r\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          const upper = line.toUpperCase();
+          if (upper.startsWith("EHLO")) socket.write("250-localhost\r\n250 AUTH PLAIN\r\n");
+          else if (upper.startsWith("AUTH PLAIN")) socket.write("235 2.7.0 Authentication successful\r\n");
+          else if (upper.startsWith("MAIL FROM:") || upper.startsWith("RCPT TO:")) socket.write("250 2.1.0 OK\r\n");
+          else if (upper === "DATA") {
+            inData = true;
+            socket.write("354 End data with <CR><LF>.<CR><LF>\r\n");
+          } else if (upper === "QUIT") socket.write("221 2.0.0 Bye\r\n");
+        }
+      });
+    });
+
+    await new Promise<void>((resolve) => smtpServer.listen(0, "127.0.0.1", resolve));
+    const addr = smtpServer.address() as import("node:net").AddressInfo;
+
+    const prevProvider = process.env.EMAIL_PROVIDER;
+    const prevHost = process.env.SMTP_HOST;
+    const prevPort = process.env.SMTP_PORT;
+    const prevUser = process.env.SMTP_USER;
+    const prevPass = process.env.SMTP_PASS;
+
+    try {
+      process.env.EMAIL_PROVIDER = "smtp";
+      process.env.SMTP_HOST = "";
+      expect(() => getEmailTransport()).toThrow(/SMTP_HOST/);
+
+      process.env.SMTP_HOST = "127.0.0.1";
+      process.env.SMTP_PORT = String(addr.port);
+      process.env.SMTP_USER = "shortly-mailer";
+      process.env.SMTP_PASS = "smtp-secret";
+
+      const emailRes = await authService.resendVerification(userId);
+      expect(emailRes).toMatchObject({ sent: true });
+      const rawToken = (emailRes as { devVerificationToken?: string }).devVerificationToken;
+      expect(rawToken).toBeTruthy();
+      expect(received[0]).toContain("Verify your Shortly email address");
+      expect(received[0]).toContain(`/verify-email?token=${rawToken}`);
+
+      await expect(authService.verifyEmail({ token: "invalid-token-0123456789" })).rejects.toMatchObject({
+        statusCode: 400,
+      });
+      const verified = await authService.verifyEmail({ token: rawToken! });
+      expect(verified).toMatchObject({ verified: true });
+
+      const profile = await authService.getProfile(userId);
+      expect(profile.emailVerified).toBe(true);
+      expect(await authService.resendVerification(userId)).toEqual({ alreadyVerified: true });
+    } finally {
+      process.env.EMAIL_PROVIDER = prevProvider ?? "console";
+      process.env.SMTP_HOST = prevHost ?? "";
+      process.env.SMTP_PORT = prevPort ?? "587";
+      process.env.SMTP_USER = prevUser ?? "";
+      process.env.SMTP_PASS = prevPass ?? "";
+      smtpServer.close();
+    }
+
+    // Extra apiKey & auth account branches
+    expect(await apiKeyService.verifyBearerKey("bad_prefix")).toBeNull();
+    expect(await apiKeyService.verifyBearerKey("sk_live_missing")).toBeNull();
+    await expect(apiKeyService.revokeKey(userId, "nonexistent-key")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    const updatedProfile = await authService.updateAccount(userId, {
+      action: "profile",
+      name: "Updated Name",
+    });
+    expect((updatedProfile as { name: string | null }).name).toBe("Updated Name");
+    await expect(
+      authService.updateAccount(userId, {
+        action: "password",
+        currentPassword: "WrongPassword!",
+        newPassword: "NewPassword123!",
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(
+      await persistClickBatch([
+        {
+          shortUrlId: "deleted-link-id",
+          clickedAt: new Date().toISOString(),
+          referrerHost: null,
+          referrerUrl: null,
+          country: "US",
+          region: "CA",
+          city: "SF",
+          deviceType: "desktop",
+          browser: "Chrome",
+          os: "Windows",
+          isBot: false,
+          visitorHash: "vh1",
+          source: null,
+          utmSource: null,
+          utmMedium: null,
+          utmCampaign: null,
+          variantId: null,
+        },
+      ])
+    ).toBe(0);
+  });
 });

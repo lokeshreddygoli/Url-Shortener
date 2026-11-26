@@ -36,7 +36,8 @@
 | AUD-08 (E2E) | WebKit HTTP `Secure` cookie fix, `/docs` React 19 bookmarklet fix, added `firefox` & `webkit` Playwright projects (8/8 passed) | Done | `2690c22` |
 | AUD-08 (Perf) | Font `display: "optional"`, `prefetch={false}` on secondary links, lazy `CommandPalette`, `optimizePackageImports` -> **100/100/100/100** Desktop & Mobile Lighthouse across `/`, `/login`, `/dashboard` | Done | `576c728` |
 | Docs & Reports | Screenshots, relative-link `README.md`, `PERFORMANCE_REPORT.md`, `DEPLOYMENT_GUIDE.md`, `FINAL_TEST_REPORT.md`, `SECURITY_AUDIT.md`, updated `FINAL_AUDIT.md` | Done | `7075ec6` / `c4f9fc8` |
-| RC `v1.0.0` | Version bump (`1.0.0`), Prisma 6.19.3 migration/compatibility check, standalone `server.js` runtime test, PG/Redis/restart/queue-recovery chaos test, Playwright WebKit test race fixes (8/8 pass), `RELEASE_CHECKLIST.md`, `RELEASE_REPORT.md` | Verified locally (cloud deploy & Docker daemon pending external host/env) | HEAD |
+| RC `v1.0.0` | Version bump (`1.0.0`), Prisma 6.19.3 migration/compatibility check, standalone `server.js` runtime test, PG/Redis/restart/queue-recovery chaos test, Playwright WebKit test race fixes (8/8 pass), `RELEASE_CHECKLIST.md`, `RELEASE_REPORT.md` | Done | `ff3d281` |
+| Readiness Mission | Upgraded `vitest@5.1.2` (0 critical/moderate advisories), added zero-dep native SMTP (`src/lib/email.ts`) + `/verify-email` flow, runtime OAuth `force-dynamic`, standalone `server.js` check, 18-point Phase 5 acceptance suite, updated readiness matrix (`RELEASE_CHECKLIST.md` & `RELEASE_REPORT.md`) | Verified locally; release tag held pending Docker & live cloud deploy | HEAD |
 
 ## Final Verified Evidence
 - `npm run lint` → 0 errors, 0 warnings

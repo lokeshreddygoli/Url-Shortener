@@ -27,11 +27,12 @@ Every attack surface below was audited against actual route handlers, services, 
 
 ## 2. Dependency Audit (`npm audit`) Investigation
 
-- **Command Run:** `npm audit --omit=dev` (after `npm prune` to ensure `node_modules` matches `package-lock.json` cleanly).
-- **Findings:**
-  - **0 Critical** vulnerabilities in production dependency graph.
-  - **4 High** transitive advisories (`deepmerge-ts <8.0.0`, `effect <=3.22.0`) pulled exclusively by `@prisma/config` (a CLI dependency of `prisma@6.19.3`). Remediation via `npm audit fix --force` requires a breaking major upgrade to `prisma@7.10.1`. Because `@prisma/config` is not invoked by Next.js runtime HTTP/API handlers, there is **0 runtime web/API exposure**; tracked for planned Prisma 7 migration.
-  - **Dev-only (`npm audit` full tree):** Additionally flags `vitest@3.2.7` / `tinypool` (test runner only, requires breaking `vitest@5.1.2` major upgrade). Never shipped in production Next.js standalone image.
+- **Stage 1 Remediation Applied:** Upgraded `vitest` and `@vitest/coverage-v8` from `3.2.7` → `5.1.2`, resolving all **2 critical** (`tinypool <=2.1.1`) and **5 moderate** (`@vitest/mocker`, `glob`, `minimatch`, `test-exclude`) advisories in the dev/test tree.
+- **Native Zero-Dependency SMTP:** Implemented `SmtpEmailTransport` in `src/lib/email.ts` using Node.js built-in `node:net` and `node:tls` (with CRLF header injection sanitization) rather than adding `nodemailer` (which currently carries 15 high upstream advisories in `<=10.1.3`).
+- **Commands Run:** `npm audit --omit=dev` and `npm audit`.
+- **Remaining Findings (Accepted CLI-Only Exception):**
+  - **0 Critical**, **0 Moderate**, **0 Low** vulnerabilities across both production and full dependency trees.
+  - **4 High** transitive advisories (`deepmerge-ts <8.0.0`, `effect <=3.22.0`) pulled exclusively by `@prisma/config@6.19.3` via `prisma@6.19.3` (surfaced in `--omit=dev` through `@prisma/client` `peerDependencies`). `6.19.3` is the final Prisma `6.x` release; `npm audit` suggests `prisma@7.10.1` (`isSemVerMajor: true`), which introduces breaking schema/driver-adapter changes (`url = env("DATABASE_URL")` removal + `@prisma/adapter-pg`), and `@prisma/config@7.10.1` still pins `effect@3.20.0`. Because `@prisma/config` is strictly Prisma CLI configuration tooling (`@prisma/client` has `dependencies: undefined`) and zero runtime Next.js HTTP/API routes import it, this exception is documented and accepted for `v1.0.0`.
 
 ---
 

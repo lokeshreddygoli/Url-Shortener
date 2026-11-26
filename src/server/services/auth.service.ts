@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { getEmailTransport } from "@/lib/email";
 import { invalidateCachedLink } from "@/lib/cache";
+import { logger } from "@/lib/logger";
 import {
   deleteAccountSchema,
   forgotPasswordSchema,
@@ -12,6 +13,7 @@ import {
   registerSchema,
   resetPasswordSchema,
   updateAccountSchema,
+  verifyEmailSchema,
 } from "@/lib/validators/auth";
 import { urlService } from "@/server/services/url.service";
 
@@ -51,6 +53,12 @@ export const authService = {
             // Ignore invalid/expired guest tokens during signup
           }
         }
+      }
+
+      try {
+        await this.issueVerificationEmail(user.email);
+      } catch (emailErr) {
+        logger.warn({ err: emailErr, userId: user.id }, "Failed to send verification email on signup");
       }
 
       return { user, claimedLinks };
@@ -193,6 +201,76 @@ export const authService = {
     return { reset: true };
   },
 
+  async issueVerificationEmail(email: string) {
+    const normalizedEmail = email.toLowerCase();
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+    await prisma.verificationToken.deleteMany({
+      where: { identifier: normalizedEmail },
+    });
+    await prisma.verificationToken.create({
+      data: {
+        identifier: normalizedEmail,
+        token: tokenHash,
+        expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+    const verifyUrl = `${appUrl}/verify-email?token=${rawToken}`;
+
+    await getEmailTransport().send({
+      to: normalizedEmail,
+      subject: "Verify your Shortly email address",
+      text: `Confirm your email address by visiting: ${verifyUrl} (valid for 24 hours).`,
+    });
+
+    return {
+      sent: true,
+      ...(process.env.NODE_ENV === "test" ? { devVerificationToken: rawToken } : {}),
+    };
+  },
+
+  async resendVerification(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, emailVerified: true },
+    });
+    if (!user) {
+      throw new AppError(404, "NOT_FOUND", "User not found");
+    }
+    if (user.emailVerified) {
+      return { alreadyVerified: true };
+    }
+    return this.issueVerificationEmail(user.email);
+  },
+
+  async verifyEmail(rawInput: unknown) {
+    const parsed = verifyEmailSchema.parse(rawInput);
+    const tokenHash = crypto.createHash("sha256").update(parsed.token).digest("hex");
+
+    const record = await prisma.verificationToken.findUnique({
+      where: { token: tokenHash },
+    });
+
+    if (!record || record.expires.getTime() <= Date.now()) {
+      throw new AppError(400, "INVALID_INPUT", "Verification token is invalid or has expired");
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { email: record.identifier },
+        data: { emailVerified: new Date() },
+      }),
+      prisma.verificationToken.delete({
+        where: { token: tokenHash },
+      }),
+    ]);
+
+    return { verified: true, email: record.identifier };
+  },
+
   async getProfile(userId: string) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -201,6 +279,7 @@ export const authService = {
         email: true,
         name: true,
         role: true,
+        emailVerified: true,
         passwordHash: true,
         createdAt: true,
         _count: {
@@ -218,6 +297,7 @@ export const authService = {
       email: user.email,
       name: user.name,
       role: user.role,
+      emailVerified: Boolean(user.emailVerified),
       hasPassword: Boolean(user.passwordHash),
       createdAt: user.createdAt.toISOString(),
       counts: {

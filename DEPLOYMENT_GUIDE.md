@@ -19,8 +19,8 @@ Generate distinct cryptographically random 32+ byte secrets (for example with `o
 - `AUTH_TRUST_HOST`: Set `true` when running behind a reverse proxy / load balancer (Nginx, Caddy, Cloudflare, Vercel).
 
 ### Optional Production Integrations
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`: Enables Google OAuth when both are set.
-- `EMAIL_PROVIDER="smtp"`, `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`: Real SMTP delivery for password resets (defaults to `console` logger in dev).
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`: Enables Google OAuth dynamically at runtime on `/login` (`force-dynamic`) when both are set.
+- `EMAIL_PROVIDER="smtp"`, `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` (`"true"` on port 465 or `"false"` for STARTTLS on 587), `SMTP_USER`, `SMTP_PASS`: Real transactional email delivery (`SmtpEmailTransport` via Node `node:net`/`node:tls`) for password reset and `/verify-email` tokens (defaults to `console` logger in dev).
 - `GOOGLE_SAFE_BROWSING_API_KEY`: Enables Google Safe Browsing v4 API checks alongside built-in SSRF/heuristic checks.
 - `REDIRECT_RATE_LIMIT`: Default `600` requests/min/IP on `GET /:code` (override if needed).
 - `LOG_LEVEL`: `info` (JSON structured logs via Pino with automatic redaction of `authorization`, `cookie`, `password`, `token`, `apiKey`).
@@ -71,7 +71,7 @@ Generate distinct cryptographically random 32+ byte secrets (for example with `o
 
 ---
 
-## 5. Database Backup & Recovery Strategy
+## 5. Database Backup, Recovery & Rollback Strategy
 
 1. **Automated Daily Backups (Docker / VPS cron):**
    ```bash
@@ -83,4 +83,9 @@ Generate distinct cryptographically random 32+ byte secrets (for example with `o
    pg_restore --clean --if-exists --dbname="$RESTORE_DATABASE_URL" shortly-YYYY-MM-DD.dump
    npx prisma migrate status
    ```
-3. **Redis Durability:** Configured with `--appendonly yes` (`AOF`). Because PostgreSQL holds all canonical links and flushed analytics (`DailyLinkStats` + `ClickEvent`), Redis is safely ephemeral/recoverable: even after total Redis loss, cache warms automatically on redirect misses and crash-safe Lua processing prevents lost clicks while queued clicks are in flight.
+3. **Production Rollback Procedure:**
+   - **Application Rollback (Docker Compose / Vercel):** Re-deploy the previous immutable image tag (`docker compose up -d --no-deps app` with previous image SHA) or promote the prior production deployment in Vercel (`vercel rollback <deployment-url>`).
+   - **Database Migration Safety:** All schema changes must be backward-compatible across `N` and `N-1` app releases (expand-and-contract). If a migration must be reverted, restore from the pre-release `pg_dump` snapshot taken before `npx prisma migrate deploy` and run `npx prisma migrate resolve --rolled-back <migration_name>`.
+4. **Logging & Error Monitoring:**
+   - All API and worker errors emit structured JSON via Pino (`src/lib/logger.ts`) with `requestId` correlation and automated redaction of `authorization`, `cookie`, `password`, `token`, and `apiKey`. Forward container stdout/stderr or Vercel logs to Datadog, Grafana Loki, Better Stack, or CloudWatch, and alert on `GET /api/ready` `503` responses or `5xx` spikes.
+5. **Redis Durability:** Configured with `--appendonly yes` (`AOF`). Because PostgreSQL holds all canonical links and flushed analytics (`DailyLinkStats` + `ClickEvent`), Redis is safely ephemeral/recoverable: even after total Redis loss, cache warms automatically on redirect misses and crash-safe Lua processing prevents lost clicks while queued clicks are in flight.

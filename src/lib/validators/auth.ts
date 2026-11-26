@@ -27,6 +27,10 @@ export const resetPasswordSchema = z.object({
     .max(128, "Password cannot exceed 128 characters"),
 });
 
+export const verifyEmailSchema = z.object({
+  token: z.string().trim().min(16, "Invalid verification token").max(256),
+});
+
 export const updateAccountSchema = z.union([
   z.object({
     action: z.literal("profile"),

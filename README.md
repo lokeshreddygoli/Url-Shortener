@@ -93,6 +93,8 @@ flowchart LR
 - [Security Audit Report](SECURITY_AUDIT.md)
 - [Performance & Reliability Report](PERFORMANCE_REPORT.md)
 - [Production Deployment Guide](DEPLOYMENT_GUIDE.md)
+- [Release Candidate Checklist](RELEASE_CHECKLIST.md)
+- [Release Readiness Report](RELEASE_REPORT.md)
 - [Build Progress Log](PROGRESS.md)
 - [Engineering & Interview Notes](INTERVIEW_NOTES.md)
 
@@ -103,9 +105,9 @@ flowchart LR
 - **Frontend / App:** Next.js `16.4.6` (App Router, Turbopack), React `19.3.1`, TypeScript (`strict: true`), Tailwind CSS v4, Lucide Icons, Recharts, Framer Motion
 - **Database:** PostgreSQL 17 + Prisma `6.19.3`
 - **Cache / Queue / Rate Limit:** Redis (`ioredis` `6.1.0`) with automatic in-memory / direct-DB fallback
-- **Auth:** Auth.js (`next-auth` `5.0.0-beta.32`) with Credentials (`bcryptjs`) + optional Google OAuth
+- **Auth & Email:** Auth.js (`next-auth` `5.0.0-beta.32`) with Credentials (`bcryptjs`), email verification (`/verify-email`), optional Google OAuth, and zero-dependency native SMTP (`node:net`/`node:tls` STARTTLS/TLS + AUTH PLAIN)
 - **Validation & Logging:** Zod `4.6.7`, Pino `10.4.0` structured JSON logging
-- **Testing & Load:** Vitest `3.2.7`, Playwright `1.65.1` + `@axe-core/playwright`, k6 `v2.4.0`
+- **Testing & Load:** Vitest `5.1.2`, Playwright `1.65.1` + `@axe-core/playwright`, k6 `v2.4.0`
 
 ---
 
@@ -123,8 +125,8 @@ See [.env.example](.env.example) for the complete template.
 | `GUEST_CLAIM_SECRET` | Yes | ≥ 32-char secret for signing guest link claim tokens (required in production) |
 | `APP_URL` | Yes | Canonical base URL (e.g. `https://short.ly`) |
 | `NEXTAUTH_URL` | No | Auth.js canonical URL (set equal to `APP_URL` in production) |
-| `GOOGLE_CLIENT_ID` / `SECRET` | No | Enables Google OAuth sign-in when both are set |
-| `EMAIL_PROVIDER` | No | `console` (default dev logger) or `smtp` |
+| `GOOGLE_CLIENT_ID` / `SECRET` | No | Enables Google OAuth sign-in dynamically at runtime when both are set |
+| `EMAIL_PROVIDER` | No | `console` (default dev logger) or `smtp` (native STARTTLS/TLS `SMTP_HOST`/`SMTP_PORT`/`SMTP_SECURE`/`SMTP_USER`/`SMTP_PASS`) |
 | `GOOGLE_SAFE_BROWSING_API_KEY` | No | Enables Google Safe Browsing v4 checks alongside local heuristics |
 | `REDIRECT_RATE_LIMIT` | No | Overrides default per-IP redirect limit (`600`/min) |
 

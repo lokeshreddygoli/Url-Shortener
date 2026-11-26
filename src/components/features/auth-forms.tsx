@@ -414,3 +414,114 @@ export function ResetPasswordForm() {
     </Card>
   );
 }
+
+export function VerifyEmailCard() {
+  const params = useSearchParams();
+  const initialToken = params.get("token") ?? "";
+  const [token, setToken] = React.useState(initialToken);
+  const [status, setStatus] = React.useState<"idle" | "verifying" | "verified" | "error">(
+    initialToken ? "verifying" : "idle"
+  );
+  const [message, setMessage] = React.useState<string>("");
+
+  const submitToken = React.useCallback(async (value: string) => {
+    setStatus("verifying");
+    setMessage("");
+    try {
+      const res = await fetch("/api/auth/verify-email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: value.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        setStatus("error");
+        setMessage(json?.error?.message || "Verification failed");
+        return;
+      }
+      setStatus("verified");
+      setMessage(`Verified ${json.data?.email ?? "your email address"}.`);
+    } catch {
+      setStatus("error");
+      setMessage("Network error while verifying email");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!initialToken) return;
+    let active = true;
+    fetch("/api/auth/verify-email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: initialToken.trim() }),
+    })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!active) return;
+        if (!res.ok || json.error) {
+          setStatus("error");
+          setMessage(json?.error?.message || "Verification failed");
+          return;
+        }
+        setStatus("verified");
+        setMessage(`Verified ${json.data?.email ?? "your email address"}.`);
+      })
+      .catch(() => {
+        if (!active) return;
+        setStatus("error");
+        setMessage("Network error while verifying email");
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialToken]);
+
+  return (
+    <Card className="w-full p-6 sm:p-8">
+      <h1 className="text-xl font-semibold tracking-tight">Verify your email</h1>
+      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+        Confirm your Shortly account email address.
+      </p>
+
+      {status === "verified" ? (
+        <div className="mt-6 space-y-4">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200">
+            {message}
+          </div>
+          <Link href="/dashboard">
+            <Button className="w-full">Go to dashboard</Button>
+          </Link>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submitToken(token);
+          }}
+          className="mt-6 space-y-4"
+        >
+          <div>
+            <label htmlFor="verify-token" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              Verification token
+            </label>
+            <Input
+              id="verify-token"
+              required
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              className="mt-1.5"
+            />
+          </div>
+          {status === "error" && (
+            <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">
+              {message}
+            </p>
+          )}
+          <Button type="submit" className="w-full" disabled={status === "verifying"}>
+            {status === "verifying" ? "Verifying..." : "Verify email"}
+          </Button>
+        </form>
+      )}
+    </Card>
+  );
+}
